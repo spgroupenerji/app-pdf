@@ -11,7 +11,7 @@ use crate::hakkinda::hakkinda_penceresi;
 use crate::mesaj::{IslemTalebi, RenderSonuc, RenderTalebi};
 use crate::sabitler::{DOKUNMA_HEDEFI, SURUM, FIRMA};
 use crate::sekme::{PdfSekme, SigdirmaModu, SolPanelModu};
-use crate::tema::tema_uygula;
+use crate::tema::{tema_uygula, zemin_rengi};
 
 const SON_DOSYALAR_AZAMI: usize = 10;
 const DPI_CARPANI: f32 = 2.5; // 2.5x Ultra HD Supersampling Netliği
@@ -329,7 +329,12 @@ impl GoruntuleyiciUygulama {
 }
 
 impl eframe::App for GoruntuleyiciUygulama {
-    #[allow(deprecated)]
+    // eframe öntanımlı temizleme rengi near-siyahtır; ilk karede ve pencere
+    // yeniden boyutlanırken palet zemini görünmesi için geçersiz kılınır.
+    fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
+        zemin_rengi(self.koyu_tema).to_normalized_gamma_f32()
+    }
+
     fn ui(&mut self, ui: &mut egui::Ui, _cerceve: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
 
@@ -374,7 +379,19 @@ impl eframe::App for GoruntuleyiciUygulama {
             }
         });
 
-        // 4) Ust menu cubugu
+        // 4) Merkez: kök Ui arka plan boyamaz; palet zemini tek panel dolgusundan gelir.
+        egui::CentralPanel::default()
+            .frame(egui::Frame::new().fill(ui.visuals().panel_fill))
+            .show_inside(ui, |ui| self.ana_alan_ciz(ui));
+    }
+}
+
+impl GoruntuleyiciUygulama {
+    /// Menü çubuğu ve merkez alanı (karşılama ekranı ya da sekmeli dock) burada çizilir.
+    #[allow(deprecated)]
+    fn ana_alan_ciz(&mut self, ui: &mut egui::Ui) {
+        let ctx = ui.ctx().clone();
+
         egui::menu::bar(ui, |ui| {
             ui.menu_button("Dosya", |ui| {
                 if ui.button("📂 Belge Aç... (Ctrl+O)").clicked() {
@@ -413,15 +430,6 @@ impl eframe::App for GoruntuleyiciUygulama {
                 }
             });
 
-            ui.menu_button("Görünüm", |ui| {
-                let tema_etiket = if self.koyu_tema { "Koyu Tema" } else { "Açık Tema" };
-                if ui.button(tema_etiket).clicked() {
-                    self.koyu_tema = !self.koyu_tema;
-                    UygulamaAyarlari::tema_kaydet(self.koyu_tema);
-                    ui.close();
-                }
-            });
-
             ui.menu_button("Yardım", |ui| {
                 ui.label(egui::RichText::new("Klavye Kısayolları:").strong());
                 ui.label("• Ctrl + O : PDF Belgesi Aç");
@@ -431,8 +439,6 @@ impl eframe::App for GoruntuleyiciUygulama {
                 ui.label("• Home / End : İlk / Son Sayfaya Git");
                 ui.label("• Ctrl + Tekerlek : Akıcı Yakınlaştır / Uzaklaştır");
                 ui.label("• Ctrl + 0 : Zum %100 Sıfırla");
-                ui.separator();
-                ui.label("Rust + MuPDF + egui Güçlü PDF Görüntüleyici");
                 ui.separator();
                 if ui.button("ℹ Hakkında").clicked() {
                     self.hakkinda_acok = true;
@@ -459,7 +465,7 @@ impl eframe::App for GoruntuleyiciUygulama {
                 .show(ui, |ui| {
                     ui.vertical_centered(|ui| {
                         ui.add_space((ui.available_height() * 0.30).clamp(24.0, 96.0));
-                        ui.heading(egui::RichText::new("Rust PDF Görüntüleyici").size(28.0).strong());
+                        ui.heading(egui::RichText::new("SP GROUP PDF Görüntüleyici").size(28.0).strong());
                         ui.add_space(12.0);
                         ui.label(egui::RichText::new("Hızlı, güvenli ve kararlı PDF okuma deneyimi").weak());
                         ui.add_space(24.0);

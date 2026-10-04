@@ -123,6 +123,12 @@ fn gorsel_olustur(p: &Palet, koyu: bool) -> Visuals {
     v
 }
 
+/// Pencerenin egui çiziminden önce temizlendiği zemin rengi
+/// (ilk kare ve yeniden boyutlandırma boşluklarında görünür).
+pub fn zemin_rengi(koyu: bool) -> Color32 {
+    if koyu { KOYU.zemin } else { ACIK.zemin }
+}
+
 /// Tema görselini uygular ve dokunmatik stil (44px hedef, geniş aralıklar) ayarlar.
 pub fn tema_uygula(ctx: &egui::Context, koyu: bool) {
     ctx.set_visuals(gorsel_olustur(if koyu { &KOYU } else { &ACIK }, koyu));
