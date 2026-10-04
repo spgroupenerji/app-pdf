@@ -1,0 +1,25 @@
+# Editor ve isletim sistemi dosyalari
+/.idea/
+/.vscode/
+*.rsuser
+*.suo
+*.user
+Thumbs.db
+
+# Yerel dosyalar (repoya girmez)
+/md/
+/test/
+AGENTS.md
+CLAUDE.md
+.zcodeignore
+.claude/
+.ignore
+
+# Kod analizi indeksleri (sadece local)
+/.codegraph/
+/.gitnexus/
+/graft/
+
+# Rust derleme ciktilari
+/target/
+

@@ -1,0 +1,40 @@
+[package]
+name = "pdf_goruntuleyici"
+version = "2026.7.24-beta"
+edition = "2021"
+description = "MuPDF ve egui tabanli, cok is paracikli Windows PDF goruntuleyici"
+
+[dependencies]
+# GUI ve sekmeli arayuz cercevesi (egui_dock 0.19 <-> egui 0.34 uyumu dogrulandi)
+# Glow renderer: mipmap_mode yalnizca egui_glow backend'inde calisir; wgpu 0.34'te yok sayiliyor.
+eframe = { version = "0.34", default-features = false, features = [
+    "accesskit",
+    "default_fonts",
+    "glow",
+] }
+egui = "0.34"
+egui_dock = "0.19"
+# MuPDF Rust baglamlari (Cekirdek render motoru; C kaynagi derlenir)
+mupdf = "0.8"
+# Is parcaciklari arasi asenkron mesajlasma
+crossbeam-channel = "0.5"
+# Yerel dosya acma diyalogu
+rfd = "0.17"
+image = "0.25"
+
+[build-dependencies]
+# Windows exe ikonu: assets/logo.png derleme sirasinda .ico'ya donusturulup gomulur
+embed-resource = "3.0"
+ico = "0.5"
+image = "0.25"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+panic = "abort"
+
+[patch.crates-io]
+# Windows MSVC'de mupdf 0.8.0'in "max_align_t" derleme hatasini gideren yerel yama (github issue #222).
+# Yalnizca Rust sarmalayici (mupdf) yamalanir; mupdf-sys crates.io'dan oldukca kullanilir.
+mupdf = { path = "vendor/mupdf" }
