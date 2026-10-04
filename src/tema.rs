@@ -30,30 +30,31 @@ pub fn gorsel_acik() -> Visuals {
     v
 }
 
-/// Göz yormayan karanlık tema görseli (saf siyah yerine koyu lacivert-gri).
+/// Göz yormayan karanlık tema görseli (kurumsal modern nötr gri grafit tonları).
 pub fn gorsel_koyu() -> Visuals {
     let mut v = Visuals::dark();
-    let zemin = renk("#1B1D22", Color32::from_gray(20));
-    let metin = renk("#D6D6DA", Color32::WHITE);
+    let zemin = renk("#1E1F22", Color32::from_gray(24));
+    let metin = renk("#DFE1E5", Color32::WHITE);
     let vurgu = renk("#5B9BD5", Color32::BLUE);
     v.panel_fill = zemin;
-    v.window_fill = renk("#23252C", Color32::from_gray(30));
-    v.extreme_bg_color = renk("#16181C", Color32::from_gray(15));
-    v.faint_bg_color = renk("#2A2D34", Color32::from_gray(35));
+    v.window_fill = renk("#2B2D30", Color32::from_gray(36));
+    v.extreme_bg_color = renk("#18191B", Color32::from_gray(18));
+    v.faint_bg_color = renk("#26282B", Color32::from_gray(34));
     v.widgets.noninteractive.fg_stroke = Stroke::new(1.0_f32, metin);
     v.widgets.noninteractive.bg_fill = zemin;
-    v.widgets.inactive.fg_stroke = Stroke::new(1.0_f32, renk("#A8A8B2", Color32::from_gray(160)));
-    v.widgets.inactive.bg_fill = renk("#2A2D34", zemin);
+    v.widgets.noninteractive.bg_stroke = Stroke::new(1.0_f32, renk("#3A3C40", Color32::from_gray(56)));
+    v.widgets.inactive.fg_stroke = Stroke::new(1.0_f32, renk("#B8BCC2", Color32::from_gray(180)));
+    v.widgets.inactive.bg_fill = renk("#2B2D30", zemin);
     v.widgets.hovered.fg_stroke = Stroke::new(1.0_f32, Color32::WHITE);
-    v.widgets.hovered.bg_fill = renk("#2E323B", zemin);
+    v.widgets.hovered.bg_fill = renk("#393B40", zemin);
     v.widgets.active.fg_stroke = Stroke::new(1.0_f32, Color32::WHITE);
-    v.widgets.active.bg_fill = renk("#363B46", zemin);
+    v.widgets.active.bg_fill = renk("#43454A", zemin);
     v.selection.bg_fill = renk("#3A506B", vurgu);
     v.hyperlink_color = vurgu;
     v
 }
 
-/// Tema görselini uygular ve dokunmatik stil (48px hedef, geniş aralıklar) ayarlar.
+/// Tema görselini uygular ve dokunmatik stil (44px hedef, geniş aralıklar) ayarlar.
 pub fn tema_uygula(ctx: &egui::Context, koyu: bool) {
     ctx.set_visuals(if koyu { gorsel_koyu() } else { gorsel_acik() });
     ctx.global_style_mut(|stil| {

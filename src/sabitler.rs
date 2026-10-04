@@ -17,8 +17,8 @@ pub const ADRES: &str = "Doğu İstasyon Mah. 148207 Sok. No:12/B, (PK:42430) Sa
 pub const E_POSTA: &str = "info@spgroupenerji.com";
 pub const WEB: &str = "www.spgroupenerji.com";
 
-/// Dokunmatik arayüz için minimum dokunma hedefi (px). WCAG 44pt önerisi üzerine 48px.
-pub const DOKUNMA_HEDEFI: f32 = 48.0;
+/// Dokunmatik arayüz için minimum dokunma hedefi (px). WCAG 2.5.5 (AAA) ve Apple HIG: 44px.
+pub const DOKUNMA_HEDEFI: f32 = 44.0;
 
 /// Varsayılan pencere boyutu (mantıksal puan).
 // %150 ölçekte dahi fiziksel 1500x1020 piksele denk gelir; her monitöre sığar,

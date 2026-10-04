@@ -3,13 +3,13 @@ use std::path::{Path, PathBuf};
 
 use crossbeam_channel::{Receiver, Sender};
 use eframe::egui;
-use egui_dock::{DockArea, DockState, Node, TabViewer};
+use egui_dock::{DockArea, DockState, Node, Style as DockStili, TabViewer};
 use rfd::FileDialog;
 
 use crate::isci::render_isci;
 use crate::hakkinda::hakkinda_penceresi;
 use crate::mesaj::{IslemTalebi, RenderSonuc, RenderTalebi};
-use crate::sabitler::{SURUM, FIRMA};
+use crate::sabitler::{DOKUNMA_HEDEFI, SURUM, FIRMA};
 use crate::sekme::{PdfSekme, SigdirmaModu, SolPanelModu};
 use crate::tema::tema_uygula;
 
@@ -443,7 +443,7 @@ impl eframe::App for GoruntuleyiciUygulama {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 // Emoji yerine mevcut tema metni; dokunmatik uyumlu büyük buton.
                 let tema_metin = if self.koyu_tema { "Koyu Tema" } else { "Açık Tema" };
-                let tema_buton = egui::Button::new(tema_metin).min_size(egui::vec2(110.0, 48.0));
+                let tema_buton = egui::Button::new(tema_metin).min_size(egui::vec2(110.0, DOKUNMA_HEDEFI));
                 if ui.add(tema_buton).on_hover_text("Tema Değiştir").clicked() {
                     self.koyu_tema = !self.koyu_tema;
                     UygulamaAyarlari::tema_kaydet(self.koyu_tema);
@@ -453,51 +453,61 @@ impl eframe::App for GoruntuleyiciUygulama {
 
         // 5) Merkez: Hosgeldin ekrani veya Sekmeli Dock Alani
         if self.dock_state.main_surface().num_tabs() == 0 {
-            ui.vertical_centered(|ui| {
-                ui.add_space(80.0);
-                ui.heading(egui::RichText::new("Rust PDF Görüntüleyici").size(28.0).strong());
-                ui.add_space(12.0);
-                ui.label(egui::RichText::new("Hızlı, güvenli ve kararlı PDF okuma deneyimi").weak());
-                ui.add_space(24.0);
+            // Dikey/yatay responsive: içerik küçük ekranda kaydırılabilir, üst boşluk yüksekliğe orantılı.
+            egui::ScrollArea::both()
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    ui.vertical_centered(|ui| {
+                        ui.add_space((ui.available_height() * 0.30).clamp(24.0, 96.0));
+                        ui.heading(egui::RichText::new("Rust PDF Görüntüleyici").size(28.0).strong());
+                        ui.add_space(12.0);
+                        ui.label(egui::RichText::new("Hızlı, güvenli ve kararlı PDF okuma deneyimi").weak());
+                        ui.add_space(24.0);
 
-                if ui.button(egui::RichText::new("📂  Belge Aç...").size(16.0)).clicked() {
-                    self.dosya_ac_diyalogu();
-                }
-                ui.add_space(8.0);
-                ui.label(egui::RichText::new("veya PDF dosyalarını pencereye sürükleyip bırakın").weak());
-                ui.add_space(24.0);
-                ui.label(egui::RichText::new(format!("Sürüm {}", SURUM))
-                    .size(11.0)
-                    .color(egui::Color32::from_gray(140)));
-                ui.label(egui::RichText::new(FIRMA).size(11.0).color(egui::Color32::from_gray(140)));
-
-                if !self.ayarlar.son_dosyalar.is_empty() {
-                    ui.add_space(36.0);
-                    ui.label(egui::RichText::new("Son Açılan Belgeler").strong());
-                    ui.add_space(10.0);
-
-                    let mut acilacak_yol = None;
-                    for yol in &self.ayarlar.son_dosyalar {
-                        let dosya_adi = Path::new(yol)
-                            .file_name()
-                            .and_then(|s| s.to_str())
-                            .unwrap_or(yol);
-
-                        if ui.button(format!("📄 {}", dosya_adi)).on_hover_text(yol).clicked() {
-                            acilacak_yol = Some(yol.clone());
+                        if ui.button(egui::RichText::new("📂  Belge Aç...").size(16.0)).clicked() {
+                            self.dosya_ac_diyalogu();
                         }
-                    }
-                    if let Some(yol) = acilacak_yol {
-                        self.yeni_sekme_ac(&yol);
-                    }
-                }
-            });
+                        ui.add_space(8.0);
+                        ui.label(egui::RichText::new("veya PDF dosyalarını pencereye sürükleyip bırakın").weak());
+                        ui.add_space(24.0);
+                        ui.label(egui::RichText::new(format!("Sürüm {}", SURUM))
+                            .size(11.0)
+                            .color(egui::Color32::from_gray(140)));
+                        ui.label(egui::RichText::new(FIRMA).size(11.0).color(egui::Color32::from_gray(140)));
+
+                        if !self.ayarlar.son_dosyalar.is_empty() {
+                            ui.add_space(36.0);
+                            ui.label(egui::RichText::new("Son Açılan Belgeler").strong());
+                            ui.add_space(10.0);
+
+                            let mut acilacak_yol = None;
+                            for yol in &self.ayarlar.son_dosyalar {
+                                let dosya_adi = Path::new(yol)
+                                    .file_name()
+                                    .and_then(|s| s.to_str())
+                                    .unwrap_or(yol);
+
+                                if ui.button(format!("📄 {}", dosya_adi)).on_hover_text(yol).clicked() {
+                                    acilacak_yol = Some(yol.clone());
+                                }
+                            }
+                            if let Some(yol) = acilacak_yol {
+                                self.yeni_sekme_ac(&yol);
+                            }
+                        }
+                    });
+                });
         } else {
             let mut tab_goruntuleyici = SekmeGoruntuleyici {
                 talep_gonderici: &self.talep_gonderici,
                 ekran_olcegi: self.ekran_olcegi,
             };
-            DockArea::new(&mut self.dock_state).show_inside(ui, &mut tab_goruntuleyici);
+            // Sekme çubuğu da dokunmatik hedefle aynı yükseklikte olur.
+            let mut dock_stili = DockStili::from_egui(ui.style());
+            dock_stili.tab_bar.height = DOKUNMA_HEDEFI;
+            DockArea::new(&mut self.dock_state)
+                .style(dock_stili)
+                .show_inside(ui, &mut tab_goruntuleyici);
         }
     }
 }
@@ -648,6 +658,10 @@ impl<'a> TabViewer for SekmeGoruntuleyici<'a> {
         }
 
         // --- UST KONTROL CUBUĞU ---
+        // Sığdırma isteği burada toplanır; zum, araç çubuğu çizildikten sonra
+        // kalan gerçek görünüm alanına göre uygulanır (dikey/yatay responsive).
+        let mut sigdirma_istegi: Option<SigdirmaModu> = None;
+
         ui.horizontal_wrapped(|ui| {
             // Sol Yan Panel Butonları
             if ui
@@ -705,9 +719,9 @@ impl<'a> TabViewer for SekmeGoruntuleyici<'a> {
             });
 
             ui.label("Sayfa");
-            let sayfa_girdi = ui.add(
+            let sayfa_girdi = ui.add_sized(
+                egui::vec2(48.0, DOKUNMA_HEDEFI),
                 egui::TextEdit::singleline(&mut sekme.sayfa_girdi_metni)
-                    .desired_width(36.0)
                     .horizontal_align(egui::Align::Center),
             );
 
@@ -752,31 +766,18 @@ impl<'a> TabViewer for SekmeGoruntuleyici<'a> {
             ui.separator();
 
             // Sığdırma Butonları
-            let mevcud_genislik = ui.available_width();
-            let mevcud_yukseklik = ui.available_height() - 40.0;
-
             if ui
                 .selectable_label(sekme.sigdirma_modu == SigdirmaModu::Genislik, "Genişliğe Sığdır")
                 .clicked()
             {
-                if sekme.orjinal_genislik > 0.0 {
-                    let yeni_zum = (mevcud_genislik - 32.0) / sekme.orjinal_genislik;
-                    sekme.sigdirma_modu = SigdirmaModu::Genislik;
-                    self.zum_ayarla(sekme, yeni_zum);
-                }
+                sigdirma_istegi = Some(SigdirmaModu::Genislik);
             }
 
             if ui
                 .selectable_label(sekme.sigdirma_modu == SigdirmaModu::Sayfa, "Sayfaya Sığdır")
                 .clicked()
             {
-                if sekme.orjinal_genislik > 0.0 && sekme.orjinal_yukseklik > 0.0 {
-                    let zum_genislik = (mevcud_genislik - 32.0) / sekme.orjinal_genislik;
-                    let zum_yukseklik = (mevcud_yukseklik - 32.0) / sekme.orjinal_yukseklik;
-                    let yeni_zum = zum_genislik.min(zum_yukseklik);
-                    sekme.sigdirma_modu = SigdirmaModu::Sayfa;
-                    self.zum_ayarla(sekme, yeni_zum);
-                }
+                sigdirma_istegi = Some(SigdirmaModu::Sayfa);
             }
 
             if sekme.zum != 1.0 && ui.button("100%").on_hover_text("Sıfırla").clicked() {
@@ -785,6 +786,22 @@ impl<'a> TabViewer for SekmeGoruntuleyici<'a> {
         });
 
         ui.separator();
+
+        // Sığdırma zumunu, araç çubuğu sonrası kalan görünüm alanına göre hesapla.
+        if let Some(mod_) = sigdirma_istegi {
+            if sekme.orjinal_genislik > 0.0 {
+                let alan = ui.available_size();
+                let zum_genislik = (alan.x - 32.0) / sekme.orjinal_genislik;
+                let zum = match mod_ {
+                    SigdirmaModu::Sayfa if sekme.orjinal_yukseklik > 0.0 => {
+                        zum_genislik.min((alan.y - 32.0) / sekme.orjinal_yukseklik)
+                    }
+                    _ => zum_genislik,
+                };
+                sekme.sigdirma_modu = mod_;
+                self.zum_ayarla(sekme, zum);
+            }
+        }
 
         // --- SOL YAN PANEL & ANA GÖRÜNTÜ ALANI ---
         // Sol Yan Panel
@@ -869,18 +886,18 @@ impl<'a> TabViewer for SekmeGoruntuleyici<'a> {
                         SolPanelModu::Arama => {
                             ui.heading("🔍 Belgede Ara");
                             ui.separator();
-                            ui.horizontal(|ui| {
-                                let arama_edit = ui.add(
-                                    egui::TextEdit::singleline(&mut sekme.arama_metni)
-                                        .hint_text("Metin girin..."),
-                                );
-                                if ui.button("Ara").clicked()
-                                    || (arama_edit.lost_focus()
-                                        && ui.input(|i| i.key_pressed(egui::Key::Enter)))
-                                {
-                                    self.arama_talebi_gonder(sekme);
-                                }
-                            });
+                            // Dokunmatik uyumlu: tam genişlik, 44px yükseklik; düğme altında ayrı satırda.
+                            let arama_edit = ui.add_sized(
+                                egui::vec2(ui.available_width(), DOKUNMA_HEDEFI),
+                                egui::TextEdit::singleline(&mut sekme.arama_metni)
+                                    .hint_text("Metin girin..."),
+                            );
+                            if ui.button("Ara").clicked()
+                                || (arama_edit.lost_focus()
+                                    && ui.input(|i| i.key_pressed(egui::Key::Enter)))
+                            {
+                                self.arama_talebi_gonder(sekme);
+                            }
 
                             ui.add_space(8.0);
                             egui::ScrollArea::vertical().show(ui, |ui| {
