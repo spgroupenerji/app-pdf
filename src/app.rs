@@ -472,8 +472,8 @@ impl eframe::App for GoruntuleyiciUygulama {
                         ui.add_space(24.0);
                         ui.label(egui::RichText::new(format!("Sürüm {}", SURUM))
                             .size(11.0)
-                            .color(egui::Color32::from_gray(140)));
-                        ui.label(egui::RichText::new(FIRMA).size(11.0).color(egui::Color32::from_gray(140)));
+                            .color(ui.visuals().weak_text_color()));
+                        ui.label(egui::RichText::new(FIRMA).size(11.0).color(ui.visuals().weak_text_color()));
 
                         if !self.ayarlar.son_dosyalar.is_empty() {
                             ui.add_space(36.0);
@@ -945,7 +945,7 @@ impl<'a> TabViewer for SekmeGoruntuleyici<'a> {
                 if let Some(hata) = &sekme.hata_mesaji {
                     ui.vertical_centered(|ui| {
                         ui.add_space(60.0);
-                        ui.colored_label(egui::Color32::from_rgb(200, 60, 60), "⚠ Belge açılamadı");
+                        ui.colored_label(ui.visuals().error_fg_color, "⚠ Belge açılamadı");
                         ui.add_space(8.0);
                         ui.label(egui::RichText::new(hata).weak());
                     });

@@ -1,62 +1,131 @@
-// Göz yormayan aydınlık/karanlık tema paletleri ve dokunmatik stil uygulayıcısı.
-use egui::{Color32, Stroke, Visuals};
+// Koyu/açık tema paletleri ve dokunmatik stil uygulayıcısı.
+// Tek Palet yapısı her iki modu tanımlar; tüm widget durumları ve metin
+// katmanları tek yerden türetilir, böylece modlar arası uyum garantidir.
+use egui::{Color32, CornerRadius, Stroke, Visuals};
 use crate::sabitler::DOKUNMA_HEDEFI;
 
-// Yumuşak hex renk çözücü; geçersiz girdide varsayılan renge döner.
-fn renk(hex: &str, varsayilan: Color32) -> Color32 {
-    Color32::from_hex(hex).unwrap_or(varsayilan)
+struct Palet {
+    /// Ana panel/araç çubuğu zemini.
+    zemin: Color32,
+    /// Pencere, menü ve açılır kutu zemini.
+    pencere: Color32,
+    /// En koyu/açık zemin: kaydırma alanları, sekme çubuğu.
+    extreme: Color32,
+    /// Hafif farklı zemin: çizelge şeritleri, pasif düğmeler.
+    faint: Color32,
+    /// Birincil metin.
+    metin: Color32,
+    /// İkincil/yardımcı metin (her iki zeminde de okunur kontrastta).
+    metin_zayif: Color32,
+    /// Kurumsal vurgu (bağlantı, seçim, etkin kenarlık).
+    vurgu: Color32,
+    /// Üzerine gelinen düğme zemini.
+    hover: Color32,
+    /// Basılı/etkin düğme zemini.
+    aktif: Color32,
+    /// Ayraç ve pencere kenarlığı.
+    ayirici: Color32,
+    /// Metin seçimi zemini.
+    secim: Color32,
+    /// Hata metni (koyu zeminde açık, açık zeminde koyu ton).
+    hata: Color32,
+    /// Uyarı metni.
+    uyari: Color32,
+    /// Kod/metin düzenleme alanı zemini.
+    girinti: Color32,
 }
 
-/// Göz yormayan aydınlık tema görseli (saf beyaz/siyah yerine kırık tonlar).
-pub fn gorsel_acik() -> Visuals {
-    let mut v = Visuals::light();
-    let zemin = renk("#FAFAF8", Color32::WHITE);
-    let metin = renk("#2B2B2E", Color32::BLACK);
-    let vurgu = renk("#3E7CB1", Color32::BLUE);
-    v.panel_fill = zemin;
-    v.window_fill = Color32::WHITE;
-    v.extreme_bg_color = renk("#F0F0EE", Color32::WHITE);
-    v.faint_bg_color = renk("#EDEDF0", Color32::WHITE);
-    v.widgets.noninteractive.fg_stroke = Stroke::new(1.0_f32, metin);
-    v.widgets.noninteractive.bg_fill = zemin;
-    v.widgets.inactive.fg_stroke = Stroke::new(1.0_f32, renk("#4A4A52", Color32::BLACK));
-    v.widgets.inactive.bg_fill = renk("#F2F2F5", zemin);
-    v.widgets.hovered.fg_stroke = Stroke::new(1.0_f32, renk("#1A1A1D", Color32::BLACK));
-    v.widgets.hovered.bg_fill = renk("#E6EEF7", zemin);
-    v.widgets.active.fg_stroke = Stroke::new(1.0_f32, renk("#1A1A1D", Color32::BLACK));
-    v.widgets.active.bg_fill = renk("#DDE6F2", zemin);
-    v.selection.bg_fill = renk("#D6E4F0", vurgu);
-    v.hyperlink_color = vurgu;
-    v
-}
+const KOYU: Palet = Palet {
+    // Lacivert ile gri arasında kurumsal grafit; saf siyah değil.
+    zemin: Color32::from_rgb(0x1E, 0x21, 0x28),
+    pencere: Color32::from_rgb(0x26, 0x2A, 0x33),
+    extreme: Color32::from_rgb(0x17, 0x1A, 0x20),
+    faint: Color32::from_rgb(0x2A, 0x2E, 0x38),
+    metin: Color32::from_rgb(0xE3, 0xE6, 0xEC),
+    metin_zayif: Color32::from_rgb(0x9A, 0xA3, 0xB0),
+    vurgu: Color32::from_rgb(0x5B, 0x9B, 0xD5),
+    hover: Color32::from_rgb(0x33, 0x38, 0x45),
+    aktif: Color32::from_rgb(0x3D, 0x44, 0x52),
+    ayirici: Color32::from_rgb(0x3A, 0x41, 0x50),
+    secim: Color32::from_rgb(0x34, 0x52, 0x7A),
+    hata: Color32::from_rgb(0xF2, 0x8B, 0x82),
+    uyari: Color32::from_rgb(0xFD, 0xD6, 0x63),
+    girinti: Color32::from_rgb(0x1A, 0x1D, 0x24),
+};
 
-/// Göz yormayan karanlık tema görseli (kurumsal modern nötr gri grafit tonları).
-pub fn gorsel_koyu() -> Visuals {
-    let mut v = Visuals::dark();
-    let zemin = renk("#1E1F22", Color32::from_gray(24));
-    let metin = renk("#DFE1E5", Color32::WHITE);
-    let vurgu = renk("#5B9BD5", Color32::BLUE);
-    v.panel_fill = zemin;
-    v.window_fill = renk("#2B2D30", Color32::from_gray(36));
-    v.extreme_bg_color = renk("#18191B", Color32::from_gray(18));
-    v.faint_bg_color = renk("#26282B", Color32::from_gray(34));
-    v.widgets.noninteractive.fg_stroke = Stroke::new(1.0_f32, metin);
-    v.widgets.noninteractive.bg_fill = zemin;
-    v.widgets.noninteractive.bg_stroke = Stroke::new(1.0_f32, renk("#3A3C40", Color32::from_gray(56)));
-    v.widgets.inactive.fg_stroke = Stroke::new(1.0_f32, renk("#B8BCC2", Color32::from_gray(180)));
-    v.widgets.inactive.bg_fill = renk("#2B2D30", zemin);
-    v.widgets.hovered.fg_stroke = Stroke::new(1.0_f32, Color32::WHITE);
-    v.widgets.hovered.bg_fill = renk("#393B40", zemin);
-    v.widgets.active.fg_stroke = Stroke::new(1.0_f32, Color32::WHITE);
-    v.widgets.active.bg_fill = renk("#43454A", zemin);
-    v.selection.bg_fill = renk("#3A506B", vurgu);
-    v.hyperlink_color = vurgu;
+const ACIK: Palet = Palet {
+    // Koyu paletin aynı kurumsal ailesinin aydınlık karşılığı.
+    zemin: Color32::from_rgb(0xF7, 0xF8, 0xFA),
+    pencere: Color32::WHITE,
+    extreme: Color32::from_rgb(0xEC, 0xEE, 0xF1),
+    faint: Color32::from_rgb(0xEE, 0xF0, 0xF3),
+    metin: Color32::from_rgb(0x23, 0x27, 0x2E),
+    metin_zayif: Color32::from_rgb(0x5F, 0x66, 0x72),
+    vurgu: Color32::from_rgb(0x3E, 0x7C, 0xB1),
+    hover: Color32::from_rgb(0xE4, 0xEB, 0xF3),
+    aktif: Color32::from_rgb(0xD8, 0xE2, 0xEF),
+    ayirici: Color32::from_rgb(0xC9, 0xCE, 0xD6),
+    secim: Color32::from_rgb(0xC9, 0xDA, 0xEE),
+    hata: Color32::from_rgb(0xB3, 0x26, 0x1E),
+    uyari: Color32::from_rgb(0x8A, 0x64, 0x00),
+    girinti: Color32::WHITE,
+};
+
+/// Paleti tam bir egui görseline dönüştürür; her iki mod aynı yoldan geçer.
+fn gorsel_olustur(p: &Palet, koyu: bool) -> Visuals {
+    let mut v = if koyu { Visuals::dark() } else { Visuals::light() };
+    let kenarlik = Stroke::new(1.0_f32, p.ayirici);
+
+    v.panel_fill = p.zemin;
+    v.window_fill = p.pencere;
+    v.extreme_bg_color = p.extreme;
+    v.faint_bg_color = p.faint;
+    v.text_edit_bg_color = Some(p.girinti);
+    v.code_bg_color = p.girinti;
+    v.weak_text_color = Some(p.metin_zayif);
+    v.hyperlink_color = p.vurgu;
+    v.warn_fg_color = p.uyari;
+    v.error_fg_color = p.hata;
+    v.window_stroke = kenarlik;
+    v.window_corner_radius = CornerRadius::same(8);
+    v.menu_corner_radius = CornerRadius::same(6);
+
+    v.widgets.noninteractive.fg_stroke = Stroke::new(1.0_f32, p.metin);
+    v.widgets.noninteractive.bg_fill = p.zemin;
+    v.widgets.noninteractive.bg_stroke = kenarlik;
+
+    v.widgets.inactive.fg_stroke = Stroke::new(1.0_f32, p.metin);
+    v.widgets.inactive.bg_fill = p.faint;
+    v.widgets.inactive.weak_bg_fill = p.faint;
+    v.widgets.inactive.bg_stroke = kenarlik;
+    v.widgets.inactive.corner_radius = CornerRadius::same(6);
+
+    v.widgets.open.fg_stroke = Stroke::new(1.0_f32, p.metin);
+    v.widgets.open.bg_fill = p.faint;
+    v.widgets.open.weak_bg_fill = p.faint;
+    v.widgets.open.bg_stroke = kenarlik;
+    v.widgets.open.corner_radius = CornerRadius::same(6);
+
+    v.widgets.hovered.fg_stroke = Stroke::new(1.0_f32, if koyu { Color32::WHITE } else { p.metin });
+    v.widgets.hovered.bg_fill = p.hover;
+    v.widgets.hovered.weak_bg_fill = p.hover;
+    v.widgets.hovered.bg_stroke = Stroke::new(1.0_f32, p.vurgu);
+    v.widgets.hovered.corner_radius = CornerRadius::same(6);
+
+    v.widgets.active.fg_stroke = Stroke::new(1.0_f32, if koyu { Color32::WHITE } else { p.metin });
+    v.widgets.active.bg_fill = p.aktif;
+    v.widgets.active.weak_bg_fill = p.aktif;
+    v.widgets.active.bg_stroke = Stroke::new(1.5_f32, p.vurgu);
+    v.widgets.active.corner_radius = CornerRadius::same(6);
+
+    v.selection.bg_fill = p.secim;
+    v.selection.stroke = Stroke::new(1.0_f32, p.vurgu);
     v
 }
 
 /// Tema görselini uygular ve dokunmatik stil (44px hedef, geniş aralıklar) ayarlar.
 pub fn tema_uygula(ctx: &egui::Context, koyu: bool) {
-    ctx.set_visuals(if koyu { gorsel_koyu() } else { gorsel_acik() });
+    ctx.set_visuals(gorsel_olustur(if koyu { &KOYU } else { &ACIK }, koyu));
     ctx.global_style_mut(|stil| {
         stil.spacing.interact_size = egui::vec2(DOKUNMA_HEDEFI, DOKUNMA_HEDEFI);
         stil.spacing.button_padding = egui::vec2(14.0, 12.0);

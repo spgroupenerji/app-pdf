@@ -42,7 +42,7 @@ pub fn hakkinda_penceresi(ctx: &egui::Context, acik: &mut bool) {
                 ui.add_space(4.0);
                 ui.label(RichText::new(format!("Sürüm: {}", SURUM))
                     .size(13.0)
-                    .color(egui::Color32::from_gray(160)));
+                    .color(ui.visuals().weak_text_color()));
                 ui.add_space(16.0);
                 ui.separator();
                 ui.add_space(12.0);
@@ -73,7 +73,7 @@ pub fn hakkinda_penceresi(ctx: &egui::Context, acik: &mut bool) {
                 }
                 ui.label(RichText::new("© 2026 SP GROUP ENERJİ")
                     .size(11.0)
-                    .color(egui::Color32::from_gray(140)));
+                    .color(ui.visuals().weak_text_color()));
             });
         });
     if kapat_istek {
