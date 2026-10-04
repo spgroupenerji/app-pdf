@@ -7,4 +7,6 @@ $kok = Split-Path $PSScriptRoot -Parent
 Write-Host "Surum: $env:UYGULAMA_SURUMU"
 cargo build --release --manifest-path "$kok\Cargo.toml"
 New-Item "$kok\release" -ItemType Directory -Force | Out-Null
-Copy-Item "$kok\target\release\pdf_goruntuleyici.exe" -Destination "$kok\release" -Force
+$hedef = "$kok\release\app-pdf_$env:UYGULAMA_SURUMU.exe"
+Copy-Item "$kok\target\release\pdf_goruntuleyici.exe" -Destination $hedef -Force
+Write-Host "Cikti: $hedef"
