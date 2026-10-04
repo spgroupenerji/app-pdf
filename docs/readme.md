@@ -1,12 +1,23 @@
-# PDF Görüntüleyici
+# SP GROUP PDF Görüntüleyici
 
-MuPDF ve egui tabanlı, çok iş parçacıklı Windows PDF görüntüleyici.
+MuPDF render motoru ve egui arayüz çerçevesiyle geliştirilen, çok iş parçacıklı mimariye sahip Windows PDF görüntüleyicisi.
 
-## Hazır uygulama
+## Özellikler
 
-`release/app-pdf_vYYYYMMDDHHMM.exe` — kurulum gerektirmez, doğrudan çalıştırılır.
+- Sekmeli arayüzle birden fazla belgenin eş zamanlı görüntülenmesi
+- İçindekiler, sayfa önizlemeleri, tam metin arama ve panoya kopyalama panelleri
+- Genişliğe/sayfaya sığdırma, Ctrl+tekerlek ile akıcı yakınlaştırma ve yüzde yüz sıfırlama
+- Sürükle-bırak ile toplu belge açma ve son açılan dosyalar listesi
+- Klavye kısayollarıyla hızlı sayfa gezinme (ok tuşları, PgUp/PgDn, Home/End, Ctrl+F)
+- Kurumsal koyu/açık tema; tema tercihi otomatik olarak hatırlanır
+- WCAG 2.5.5 ve Apple HIG ile uyumlu 44 px dokunma hedefleri
+- 2,5x supersampling ile yüksek çözünürlüklü ekranlarda keskin sayfa render'ı
 
-## Kaynaktan derleme
+## Hazır Uygulama
+
+`release` klasöründeki `app-pdf_vYYYYMMDDHHMM.exe` dosyası kurulum gerektirmez ve doğrudan çalıştırılır. Klasörde yalnızca en güncel sürüm bulundurulur; her derlemede önceki sürümler otomatik olarak kaldırılır. Dosya adındaki `vYYYYMMDDHHMM` damgası derleme anını gösterir ve uygulama içindeki sürüm bilgisiyle aynıdır.
+
+## Kaynaktan Derleme
 
 Gereksinimler: Rust (MSVC hedefi), Visual Studio C++ Build Tools ve LLVM (`C:\Program Files\LLVM`).
 
@@ -14,9 +25,9 @@ Gereksinimler: Rust (MSVC hedefi), Visual Studio C++ Build Tools ve LLVM (`C:\Pr
 .\vendor\derle.ps1
 ```
 
-Derleme sonunda çıktı `release\app-pdf_vYYYYMMDDHHMM.exe` adıyla kopyalanır; dosya adındaki damga, uygulama içindeki sürümle aynıdır.
+Betik sürüm damgasını oluşturur, uygulamayı derler ve çıktıyı `release\app-pdf_vYYYYMMDDHHMM.exe` adıyla kopyalar. İlk derleme MuPDF C çekirdeğini sıfırdan derlediğinden uzun sürer; sonraki derlemeler artımlıdır.
 
-## Geliştirici kurulumu (taze bilgisayar)
+## Geliştirici Kurulumu (Yeni Bilgisayar)
 
 ```powershell
 git clone https://github.com/spgroupenerji/app-pdf.git
@@ -24,20 +35,33 @@ cd app-pdf
 powershell -ExecutionPolicy Bypass -File vendor\hazirla.ps1
 ```
 
-Betik ön koşulları denetler (Rust, LLVM, MSVC), bağımlılıkları indirir ve derler.
+Betik ön koşulları denetler (Rust, LLVM, MSVC), bağımlılıkları indirir ve derler. Cargo derleme önbelleği (`target/`) makineye ve yola özgüdür; depoya dahil edilmez ve kopyalanamaz.
 
-Not: Cargo derleme önbelleği (`target/`) makineye ve yola özgüdür; depoya dahil edilmez ve kopyalanamaz (Cargo, mtime + mutlak yol tabanlı fingerprint kullanır). Taze bilgisayarda ilk derleme MuPDF C çekirdeğini sıfırdan derlediğinden uzun sürer; sonraki derlemeler artımlıdır. Yalnızca uygulamayı kullanmak isteyenler geliştirme ortamı kurmak zorunda değildir: `release/` klasöründeki en güncel `app-pdf_v...exe` doğrudan indirilebilir.
+## Güvenlik
+
+- Uygulama yalnızca yerel PDF dosyalarını işler; arka planda ağ isteği yapmaz ve kullanıcı verisi toplamaz.
+- Tercihler ve son açılan dosyalar listesi yalnızca yerel kullanıcı dizininde (`%APPDATA%\pdf_goruntuleyici`) saklanır.
+- Belge ayrıştırma ve render işlemleri, arayüz iş parçacığından bağımsız bir iş parçacığında yürütülür; sorunlu belgeler arayüzü kilitlemez.
 
 ## Sürümlandırma
 
-Her derleme, derleme anını gösteren `vYYYYMMDDHHMM` (yıl-ay-gün-saat-dakika) etiketini otomatik alır; sürüm uygulamanın Hakkında penceresinde görünür.
+Her derleme, derleme anını gösteren `vYYYYMMDDHHMM` (yıl-ay-gün-saat-dakika) damgasını otomatik alır; sürüm bilgisi uygulamanın Hakkında penceresinde görüntülenir.
 
-## Depo yapısı
+## Depo Yapısı
 
-- `src/` — uygulama kaynak kodu
-- `vendor/mupdf/` — Windows MSVC uyumu için yamalanmış MuPDF Rust sarmalayıcısı (`Cargo.toml` içinde `[patch.crates-io]` ile kullanılır)
-- `docs/` — belgeler
+| Dizin | İçerik |
+| --- | --- |
+| `src/` | Uygulama kaynak kodu |
+| `assets/` | Uygulama logosu ve ikon kaynağı |
+| `vendor/mupdf/` | Windows MSVC uyumu için yamalanmış MuPDF Rust sarmalayıcısı |
+| `vendor/*.ps1` | Derleme ve geliştirme ortamı kurulum betikleri |
+| `docs/` | Belgeler |
+| `release/` | Güncel sürümlü uygulama çalıştırıcısı |
 
 ## Lisans
 
-Uygulama bağımlılıklarından MuPDF AGPL lisanslıdır; dağıtım sırasında lisans yükümlülüklerini dikkate alın.
+Uygulama bağımlılıklarından MuPDF AGPL lisansıyla dağıtılmaktadır; yeniden dağıtım sırasında ilgili lisans yükümlülükleri dikkate alınmalıdır.
+
+---
+
+© 2026 SP GROUP ENERJİ SAN. VE TİC. LTD. ŞTİ. — info@spgroupenerji.com
