@@ -15,7 +15,7 @@ MuPDF render motoru ve egui arayüz çerçevesiyle geliştirilen, çok iş parç
 
 ## Hazır Uygulama
 
-`release` klasöründeki `app-pdf_vYYYYMMDDHHMM.exe` dosyası kurulum gerektirmez ve doğrudan çalıştırılır. Klasörde yalnızca en güncel sürüm bulundurulur; her derlemede önceki sürümler otomatik olarak kaldırılır. Dosya adındaki `vYYYYMMDDHHMM` damgası derleme anını gösterir ve uygulama içindeki sürüm bilgisiyle aynıdır.
+`release` klasöründeki `app-pdf_beta-vYYYYMMDDHHMM.exe` dosyası kurulum gerektirmez ve doğrudan çalıştırılır. Klasörde yalnızca en güncel sürüm bulundurulur; her derlemede önceki sürümler otomatik olarak kaldırılır. Dosya adındaki `beta-vYYYYMMDDHHMM` damgası derleme anını gösterir ve uygulama içindeki sürüm bilgisiyle aynıdır.
 
 ## Kaynaktan Derleme
 
@@ -25,7 +25,7 @@ Gereksinimler: Rust (MSVC hedefi), Visual Studio C++ Build Tools ve LLVM (`C:\Pr
 .\vendor\derle.ps1
 ```
 
-Betik sürüm damgasını oluşturur, uygulamayı derler ve çıktıyı `release\app-pdf_vYYYYMMDDHHMM.exe` adıyla kopyalar. İlk derleme MuPDF C çekirdeğini sıfırdan derlediğinden uzun sürer; sonraki derlemeler artımlıdır.
+Betik sürüm damgasını oluşturur, uygulamayı derler ve çıktıyı `release\app-pdf_beta-vYYYYMMDDHHMM.exe` adıyla kopyalar. İlk derleme MuPDF C çekirdeğini sıfırdan derlediğinden uzun sürer; sonraki derlemeler artımlıdır.
 
 ## Geliştirici Kurulumu (Yeni Bilgisayar)
 

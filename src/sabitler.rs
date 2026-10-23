@@ -1,7 +1,7 @@
 // Uygulama sabitleri: sürüm, firma bilgileri ve dokunmatik tasarım değerleri.
 
 /// Arayüzde gösterilen sürüm etiketi. derle.ps1 her derlemede
-/// UYGULAMA_SURUMU=vYYYYMMDDHHMM ortam değişkenini basar.
+/// UYGULAMA_SURUMU=beta-vYYYYMMDDHHMM ortam değişkenini basar.
 pub const SURUM: &str = match option_env!("UYGULAMA_SURUMU") {
     Some(v) => v,
     None => "beta-v2026.07.24",
