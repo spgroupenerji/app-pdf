@@ -1,9 +1,8 @@
-use egui::ColorImage;
 use crate::sekme::{AramaSonucu, IcindekilerOgesi};
 
-// Arayuz (UI) ile MuPDF isci is paracigi arasindaki asenkron mesajlasma protokolleri
+// Arayüz ile MuPDF işçi iş parçacığı arasındaki asenkron mesajlaşma protokolleri.
 
-/// Arayuzden MuPDF iscisine giden talep türleri
+/// Arayüzden MuPDF işçisine giden talep türleri.
 #[derive(Debug, Clone)]
 pub enum IslemTalebi {
     Render(RenderTalebi),
@@ -28,10 +27,11 @@ pub enum IslemTalebi {
     },
 }
 
-/// Arayuzden MuPDF iscisine giden piksellestirme (render) talebi
+/// Arayüzden MuPDF işçisine giden pikselliştirme (render) talebi.
 #[derive(Debug, Clone)]
 pub struct RenderTalebi {
     pub sekme_id: usize,
+    pub nesil: u64,
     pub dosya_yolu: String,
     pub sayfa_no: u32,
     pub zum: f32,
@@ -39,20 +39,28 @@ pub struct RenderTalebi {
     pub ekran_olcegi: f32,
 }
 
-/// MuPDF iscisinden arayuze donen render/işlem sonucu
+/// UI katmanının taşıdığı ham RGBA sayfa görüntüsü; MuPDF tipleri sızmaz.
+pub struct SayfaGoruntusu {
+    pub genislik: u32,
+    pub yukseklik: u32,
+    pub rgba: Vec<u8>,
+}
+
+/// MuPDF işçisinden arayüze dönen işlem sonucu.
 pub enum RenderSonuc {
     Basarili {
         sekme_id: usize,
+        nesil: u64,
         sayfa_no: u32,
         toplam_sayfa: u32,
         orjinal_genislik: f32,
         orjinal_yukseklik: f32,
-        goruntu: ColorImage,
+        goruntu: SayfaGoruntusu,
     },
     KucukResimHazir {
         sekme_id: usize,
         sayfa_no: u32,
-        goruntu: ColorImage,
+        goruntu: SayfaGoruntusu,
     },
     SayfaMetniHazir {
         sekme_id: usize,
@@ -68,6 +76,7 @@ pub enum RenderSonuc {
     },
     Hatali {
         sekme_id: usize,
+        nesil: Option<u64>,
         mesaj: String,
     },
 }

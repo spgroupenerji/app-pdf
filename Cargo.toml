@@ -2,18 +2,11 @@
 name = "pdf_goruntuleyici"
 version = "2026.7.24-beta"
 edition = "2021"
-description = "MuPDF ve egui tabanli, cok is paracikli Windows PDF goruntuleyici"
+description = "MuPDF ve GPUI tabanli, GPU hizlandirmali Windows PDF goruntuleyici"
 
 [dependencies]
-# GUI ve sekmeli arayuz cercevesi (egui_dock 0.19 <-> egui 0.34 uyumu dogrulandi)
-# Glow renderer: mipmap_mode yalnizca egui_glow backend'inde calisir; wgpu 0.34'te yok sayiliyor.
-eframe = { version = "0.34", default-features = false, features = [
-    "accesskit",
-    "default_fonts",
-    "glow",
-] }
-egui = "0.34"
-egui_dock = "0.19"
+# GPU hizlandirmali arayuz: GPUI, gpui-base, gpui-component ve Lucide ikonlari tek pakette.
+gpui-kit = "=0.8.1"
 # MuPDF Rust baglamlari (Cekirdek render motoru; C kaynagi derlenir)
 mupdf = "0.8"
 # Is parcaciklari arasi asenkron mesajlasma
@@ -32,7 +25,18 @@ image = "0.25"
 opt-level = 3
 lto = "thin"
 codegen-units = 1
-panic = "abort"
+
+# GPUI ve bagimlilari debug derlemede de tam hizda calissin.
+[profile.dev.package]
+gpui-pre = { opt-level = 3 }
+gpui-component = { opt-level = 3 }
+gpui-kit = { opt-level = 3 }
+gpui-kit-assets = { opt-level = 3 }
+gpui-pre-macros = { opt-level = 3 }
+gpui-pre-platform = { opt-level = 3 }
+rustybuzz = { opt-level = 3 }
+taffy = { opt-level = 3 }
+ttf-parser = { opt-level = 3 }
 
 [patch.crates-io]
 # Windows MSVC'de mupdf 0.8.0'in "max_align_t" derleme hatasini gideren yerel yama (github issue #222).

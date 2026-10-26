@@ -21,7 +21,7 @@ pub const WEB: &str = "www.spgroupenerji.com";
 pub const DOKUNMA_HEDEFI: f32 = 44.0;
 
 /// Varsayılan pencere boyutu (mantıksal puan).
-// %150 ölçekte dahi fiziksel 1500x1020 piksele denk gelir; her monitöre sığar,
-// tam ekrandan çıkıldığında pencerenin ekran dışına taşması önlenir.
-pub const PENCERE_GENISLIK: f32 = 1000.0;
-pub const PENCERE_YUKSEKLIK: f32 = 680.0;
+pub const PENCERE_GENISLIK: f32 = 1280.0;
+pub const PENCERE_YUKSEKLIK: f32 = 860.0;
+pub const PENCERE_MIN_GENISLIK: f32 = 960.0;
+pub const PENCERE_MIN_YUKSEKLIK: f32 = 640.0;

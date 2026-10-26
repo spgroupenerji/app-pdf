@@ -4,8 +4,8 @@
 fn main() {
     println!("cargo:rerun-if-changed=assets/logo.png");
     println!("cargo:rerun-if-env-changed=UYGULAMA_SURUMU");
-    let surum = std::env::var("UYGULAMA_SURUMU")
-        .unwrap_or_else(|_| env!("CARGO_PKG_VERSION").to_string());
+    let surum =
+        std::env::var("UYGULAMA_SURUMU").unwrap_or_else(|_| env!("CARGO_PKG_VERSION").to_string());
     println!("cargo:rustc-env=UYGULAMA_SURUMU={}", surum);
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("windows") {
         return;

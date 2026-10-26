@@ -1,56 +1,60 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod app;
-mod hata;
+mod arayuz;
 mod hakkinda;
+mod hata;
 mod isci;
 mod mesaj;
 mod sabitler;
 mod sekme;
 mod tema;
 
-use eframe::egui;
-use sabitler::{PENCERE_GENISLIK, PENCERE_YUKSEKLIK};
+use app::{
+    AramaPaneli, DosyaAc, Hakkinda, Icindekiler, IlkSayfa, KaplamaKapat, KenarPaneli, MetinPaneli,
+    OncekiSayfa, Sayfalar, SekmeKapat, SonSayfa, SonrakiSayfa, TemaDegistir, Uzaklastir,
+    Yakinlastir, ZumSifirla,
+};
+use gpui_kit::assets::Assets;
+use gpui_kit::*;
 
-// Pencere ikonu: assets/logo.png derleme zamaninda binary'ye gomulur.
-fn logo_icon() -> Option<egui::IconData> {
-    let veri = include_bytes!("../assets/logo.png");
-    let img = image::load_from_memory(veri).ok()?;
-    let rgba = img.to_rgba8();
-    let (genislik, yukseklik) = (rgba.width(), rgba.height());
-    Some(egui::IconData {
-        rgba: rgba.into_vec(),
-        width: genislik,
-        height: yukseklik,
-    })
-}
+fn main() {
+    gpui_kit::application().with_assets(Assets).run(|cx| {
+        gpui_kit::init(cx);
+        let koyu_tema = app::UygulamaAyarlari::tema_yukle();
+        tema::tema_kur(cx, koyu_tema);
+        cx.bind_keys([
+            KeyBinding::new("ctrl-o", DosyaAc, None),
+            KeyBinding::new("ctrl-w", SekmeKapat, None),
+            KeyBinding::new("ctrl-f", AramaPaneli, None),
+            KeyBinding::new("ctrl-b", KenarPaneli, None),
+            KeyBinding::new("ctrl-0", ZumSifirla, None),
+            KeyBinding::new("ctrl-shift-d", TemaDegistir, None),
+            KeyBinding::new("f1", Hakkinda, None),
+            KeyBinding::new("alt-t", Icindekiler, None),
+            KeyBinding::new("alt-s", Sayfalar, None),
+            KeyBinding::new("alt-a", AramaPaneli, None),
+            KeyBinding::new("alt-m", MetinPaneli, None),
+            KeyBinding::new("ctrl-=", Yakinlastir, None),
+            KeyBinding::new("ctrl--", Uzaklastir, None),
+            KeyBinding::new("left", OncekiSayfa, None),
+            KeyBinding::new("pageup", OncekiSayfa, None),
+            KeyBinding::new("right", SonrakiSayfa, None),
+            KeyBinding::new("pagedown", SonrakiSayfa, None),
+            KeyBinding::new("home", IlkSayfa, None),
+            KeyBinding::new("end", SonSayfa, None),
+            KeyBinding::new("escape", KaplamaKapat, None),
+        ]);
 
-// Windows giris noktasi: eframe uzerinden yerel (native) pencere baslatir.
-// persist_window: false -> eski pencere geometrisi geri yuklenmez (tasma onlenir).
-// Not: with_maximized bilerek kullanilmaz; eframe pencereyi gizli olusturur ve
-// Windows gizli pencerede maximize'i tutarsiz uygular (sagda bosluk sorunu).
-// Bunun yerine pencere gorunur olduktan sonra ilk frame'de
-// ViewportCommand::Maximized(true) gonderilir (bkz. app.rs).
-fn main() -> eframe::Result<()> {
-    let mut viewport = egui::ViewportBuilder::default()
-        .with_inner_size([PENCERE_GENISLIK, PENCERE_YUKSEKLIK])
-        .with_min_inner_size([600.0, 400.0])
-        .with_title("SP GROUP PDF Görüntüleyici")
-        .with_app_id("spgroup_pdf_goruntuleyici");
-    if let Some(icon) = logo_icon() {
-        viewport = viewport.with_icon(icon);
-    }
-
-    let secenekler = eframe::NativeOptions {
-        viewport,
-        persist_window: false,
-        renderer: eframe::Renderer::Glow,
-        ..Default::default()
-    };
-
-    eframe::run_native(
-        "SP GROUP PDF Görüntüleyici",
-        secenekler,
-        Box::new(|_olusturma_baglami| Ok(Box::new(app::GoruntuleyiciUygulama::yeni()))),
-    )
+        let gorunum = gpui_kit::open_window(app::baslik_cubugu_secenekleri(), cx, |window, cx| {
+            let uygulama = cx.new(|cx| app::GoruntuleyiciUygulama::yeni(window, cx));
+            uygulama.update(cx, |this, cx| this.dongu_baslat(cx));
+            if let Some(yol) = std::env::args().nth(1) {
+                uygulama.update(cx, |this, cx| this.dosya_ac(&yol, window, cx));
+            }
+            uygulama
+        })
+        .expect("Pencere açılamadı");
+        drop(gorunum);
+    });
 }

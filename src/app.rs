@@ -1,22 +1,55 @@
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use crossbeam_channel::{Receiver, Sender};
-use eframe::egui;
-use egui_dock::{DockArea, DockState, Node, Style as DockStili, TabViewer};
+use gpui_kit::component::input::{InputEvent, InputState};
+use gpui_kit::component::TitleBar;
+use gpui_kit::*;
 use rfd::FileDialog;
 
 use crate::isci::render_isci;
-use crate::hakkinda::hakkinda_penceresi;
-use crate::mesaj::{IslemTalebi, RenderSonuc, RenderTalebi};
-use crate::sabitler::{DOKUNMA_HEDEFI, SURUM, FIRMA};
-use crate::sekme::{PdfSekme, SigdirmaModu, SolPanelModu};
-use crate::tema::{tema_uygula, zemin_rengi};
+use crate::mesaj::{IslemTalebi, RenderSonuc, RenderTalebi, SayfaGoruntusu};
+use crate::sabitler::{
+    PENCERE_GENISLIK, PENCERE_MIN_GENISLIK, PENCERE_MIN_YUKSEKLIK, PENCERE_YUKSEKLIK,
+};
+use crate::sekme::{sigdirma_hesapla, zum_sinirla, KenarModu, PdfSekme, SigdirmaModu};
+use crate::tema;
 
 const SON_DOSYALAR_AZAMI: usize = 10;
-const DPI_CARPANI: f32 = 2.5; // 2.5x Ultra HD Supersampling Netliği
+const DPI_CARPANI: f32 = 2.5;
+const ZUM_BEKLEME: Duration = Duration::from_millis(140);
+const BILDIRIM_SURESI: Duration = Duration::from_secs(3);
 
-/// Yapılandırma ve son açılan dosyalar verisi
+gpui_kit::actions!(
+    pdf_goruntuleyici,
+    [
+        DosyaAc,
+        SonDosyalar,
+        SekmeKapat,
+        Cikis,
+        KenarPaneli,
+        Icindekiler,
+        Sayfalar,
+        AramaPaneli,
+        MetinPaneli,
+        TemaDegistir,
+        Yakinlastir,
+        Uzaklastir,
+        ZumSifirla,
+        GenisligeSigdir,
+        SayfayaSigdir,
+        OncekiSayfa,
+        SonrakiSayfa,
+        IlkSayfa,
+        SonSayfa,
+        Hakkinda,
+        YenidenDene,
+        KaplamaKapat,
+    ]
+);
+
 #[derive(Debug, Clone, Default)]
 pub struct UygulamaAyarlari {
     pub son_dosyalar: Vec<String>,
@@ -57,8 +90,7 @@ impl UygulamaAyarlari {
             if let Some(parent) = yol.parent() {
                 let _ = fs::create_dir_all(parent);
             }
-            let icerik = self.son_dosyalar.join("\n");
-            let _ = fs::write(yol, icerik);
+            let _ = fs::write(yol, self.son_dosyalar.join("\n"));
         }
     }
 
@@ -84,23 +116,23 @@ impl UygulamaAyarlari {
         })
     }
 
-    // Tema tercihini ayarlar.txt dosyasina kaydeder.
     pub fn tema_kaydet(koyu: bool) {
         if let Some(yol) = Self::ayarlar_yolu() {
             if let Some(parent) = yol.parent() {
                 let _ = fs::create_dir_all(parent);
             }
-            let _ = fs::write(yol, format!("koyu_tema={}\n", if koyu { "true" } else { "false" }));
+            let _ = fs::write(
+                yol,
+                format!("koyu_tema={}\n", if koyu { "true" } else { "false" }),
+            );
         }
     }
 
-    // Kaydedilmis tema tercihini okur; yoksa varsayilan (aydinlik) doneer.
     pub fn tema_yukle() -> bool {
         if let Some(yol) = Self::ayarlar_yolu() {
             if let Ok(veri) = fs::read_to_string(&yol) {
                 for satir in veri.lines() {
-                    let temiz = satir.trim();
-                    if let Some(deger) = temiz.strip_prefix("koyu_tema=") {
+                    if let Some(deger) = satir.trim().strip_prefix("koyu_tema=") {
                         return deger == "true";
                     }
                 }
@@ -110,891 +142,925 @@ impl UygulamaAyarlari {
     }
 }
 
-/// Uygulamanin merkezi durumu; eframe::App trait'ini uygular.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BildirimTuru {
+    Hata,
+    Basari,
+}
+
+#[derive(Debug, Clone)]
+pub struct Bildirim {
+    pub mesaj: String,
+    pub tur: BildirimTuru,
+    pub kimlik: u64,
+}
+
+/// Uygulamanın merkezi durumu ve GPUI görünümü.
 pub struct GoruntuleyiciUygulama {
-    pub dock_state: DockState<PdfSekme>,
-    pub talep_gonderici: Sender<IslemTalebi>,
-    pub sonuc_alici: Receiver<RenderSonuc>,
-    pub sekme_sayaci: usize,
+    pub belgeler: Vec<PdfSekme>,
+    pub aktif_id: Option<usize>,
+    pub sonraki_id: usize,
     pub ayarlar: UygulamaAyarlari,
     pub koyu_tema: bool,
-    pub hakkinda_acok: bool,
+    pub kenar_acik: bool,
+    pub kenar_modu: KenarModu,
+    pub hakkinda_acik: bool,
+    pub son_dosyalar_acik: bool,
+    pub talep_gonderici: Sender<IslemTalebi>,
+    pub sonuc_alici: Receiver<RenderSonuc>,
+    pub sayfa_girdisi: Entity<InputState>,
+    pub arama_girdisi: Entity<InputState>,
+    _sayfa_abone: Subscription,
+    _arama_abone: Subscription,
     pub ekran_olcegi: f32,
-    pub ilk_cerceve: bool,
+    pub logo: Option<Arc<RenderImage>>,
+    pub bildirim: Option<Bildirim>,
+    pub surukleme_uzerinde: bool,
+    dongu_basladi: bool,
+    pub sayfa_girdisi_guncelle: bool,
+    pub arama_girdisi_guncelle: bool,
+    pub odak: FocusHandle,
+    bildirim_sayaci: u64,
 }
 
 impl GoruntuleyiciUygulama {
-    /// Uygulamayi olusturur ve arka plan render iscisini baslatir.
-    pub fn yeni() -> Self {
+    pub fn yeni(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let (talep_tx, talep_rx) = crossbeam_channel::unbounded();
         let (sonuc_tx, sonuc_rx) = crossbeam_channel::unbounded();
 
-        // Arka plan render iscisini baslat
         std::thread::Builder::new()
             .name("mupdf-render-isci".to_string())
-            .spawn(move || {
-                render_isci(talep_rx, sonuc_tx);
-            })
-            .expect("Render isci is paracigi baslatilamadi");
+            .spawn(move || render_isci(talep_rx, sonuc_tx))
+            .expect("Render işçi iş parçacığı başlatılamadı");
 
         let ayarlar = UygulamaAyarlari::yukle();
         let koyu_tema = UygulamaAyarlari::tema_yukle();
 
+        let sayfa_girdisi = cx.new(|cx| {
+            InputState::new(window, cx)
+                .default_value("1")
+                .placeholder("1")
+        });
+        let arama_girdisi = cx.new(|cx| InputState::new(window, cx).placeholder("Belgede ara…"));
+
+        let sayfa_abone = cx.subscribe(&sayfa_girdisi, |this, state, olay, cx| {
+            if matches!(olay, InputEvent::PressEnter { .. }) {
+                let metin = state.read(cx).value().to_string();
+                this.sayfa_girisi_uygula(&metin, cx);
+            }
+        });
+        let arama_abone = cx.subscribe(&arama_girdisi, |this, state, olay, cx| {
+            if matches!(olay, InputEvent::PressEnter { .. }) {
+                let metin = state.read(cx).value().to_string();
+                this.arama_yap_metin(metin, cx);
+            }
+        });
+
+        let odak = cx.focus_handle();
+
         Self {
-            dock_state: DockState::new(vec![]),
-            talep_gonderici: talep_tx,
-            sonuc_alici: sonuc_rx,
-            sekme_sayaci: 0,
+            belgeler: Vec::new(),
+            aktif_id: None,
+            sonraki_id: 0,
             ayarlar,
             koyu_tema,
-            hakkinda_acok: false,
-            ekran_olcegi: 1.0,
-            ilk_cerceve: true,
+            kenar_acik: false,
+            kenar_modu: KenarModu::Icindekiler,
+            hakkinda_acik: false,
+            son_dosyalar_acik: false,
+            talep_gonderici: talep_tx,
+            sonuc_alici: sonuc_rx,
+            sayfa_girdisi,
+            arama_girdisi,
+            _sayfa_abone: sayfa_abone,
+            _arama_abone: arama_abone,
+            ekran_olcegi: window.scale_factor(),
+            logo: logo_yukle(),
+            bildirim: None,
+            surukleme_uzerinde: false,
+            dongu_basladi: false,
+            sayfa_girdisi_guncelle: false,
+            arama_girdisi_guncelle: false,
+            odak,
+            bildirim_sayaci: 0,
         }
     }
 
-    /// Yeni bir PDF belgesini yeni sekmede acar ve ilk sayfanin renderini talep eder.
-    pub fn yeni_sekme_ac(&mut self, yol: &str) {
-        self.ayarlar.dosya_ekle(yol);
-
-        self.sekme_sayaci += 1;
-        let baslik = Path::new(yol)
-            .file_name()
-            .and_then(|s| s.to_str())
-            .unwrap_or("Belge")
-            .to_string();
-        let ekran_olcegi = self.ekran_olcegi;
-        let sekme = PdfSekme::yeni(self.sekme_sayaci, baslik, yol.to_string(), ekran_olcegi);
-        self.render_talebi_gonder(&sekme);
-        self.icindekiler_talebi_gonder(&sekme);
-        self.dock_state.main_surface_mut().push_to_focused_leaf(sekme);
-    }
-
-    /// Verilen sekme icin arka plan render iscisine render talebi gonderir.
-    fn render_talebi_gonder(&self, sekme: &PdfSekme) {
-        let talep = RenderTalebi {
-            sekme_id: sekme.id,
-            dosya_yolu: sekme.dosya_yolu.clone(),
-            sayfa_no: sekme.simdiki_sayfa,
-            zum: sekme.zum,
-            dpi_carpan: DPI_CARPANI,
-            ekran_olcegi: sekme.render_ekran_olcegi,
-        };
-        let _ = self.talep_gonderici.send(IslemTalebi::Render(talep));
-    }
-
-    /// İçindekiler listesini almak için talep gönderir
-    fn icindekiler_talebi_gonder(&self, sekme: &PdfSekme) {
-        let _ = self.talep_gonderici.send(IslemTalebi::IcindekilerAl {
-            sekme_id: sekme.id,
-            dosya_yolu: sekme.dosya_yolu.clone(),
-        });
-    }
-
-    /// Arka plandan gelen render sonuclarini toplar ve ilgili sekmelere uygular.
-    fn sonuclari_uygula(&mut self, ctx: &egui::Context) -> bool {
-        let mut repaint_gerekli = false;
-        while let Ok(sonuc) = self.sonuc_alici.try_recv() {
-            self.tek_sonuc_uygula(sonuc, ctx);
-            repaint_gerekli = true;
+    pub fn dongu_baslat(&mut self, cx: &mut Context<Self>) {
+        if self.dongu_basladi {
+            return;
         }
-        repaint_gerekli
-    }
-
-    /// Tek bir render sonucunu, id'sine gore ilgili sekmeye uygular.
-    fn tek_sonuc_uygula(&mut self, sonuc: RenderSonuc, ctx: &egui::Context) {
-        let hedef_id = match &sonuc {
-            RenderSonuc::Basarili { sekme_id, .. }
-            | RenderSonuc::KucukResimHazir { sekme_id, .. }
-            | RenderSonuc::SayfaMetniHazir { sekme_id, .. }
-            | RenderSonuc::AramaTamamlandi { sekme_id, .. }
-            | RenderSonuc::IcindekilerHazir { sekme_id, .. }
-            | RenderSonuc::Hatali { sekme_id, .. } => *sekme_id,
-        };
-
-        let agac = self.dock_state.main_surface_mut();
-        'dis: for dugum in agac.iter_mut() {
-            if let Node::Leaf(yaprak) = dugum {
-                for sekme in yaprak.tabs_mut() {
-                    if sekme.id != hedef_id {
-                        continue;
-                    }
-                    match sonuc {
-                        RenderSonuc::Basarili {
-                            sayfa_no,
-                            toplam_sayfa,
-                            orjinal_genislik,
-                            orjinal_yukseklik,
-                            goruntu,
-                            ..
-                        } => {
-                            sekme.toplam_sayfa = toplam_sayfa;
-                            sekme.simdiki_sayfa = sayfa_no;
-                            sekme.sayfa_girdi_metni = (sayfa_no + 1).to_string();
-                            sekme.orjinal_genislik = orjinal_genislik;
-                            sekme.orjinal_yukseklik = orjinal_yukseklik;
-                            sekme.yukleniyor = false;
-                            sekme.hata_mesaji = None;
-
-                            if let Some(doku) = sekme.doku.as_mut() {
-                                doku.set(goruntu, egui::TextureOptions {
-                                    magnification: egui::TextureFilter::Linear,
-                                    minification: egui::TextureFilter::Linear,
-                                    wrap_mode: egui::TextureWrapMode::ClampToEdge,
-                                    mipmap_mode: Some(egui::TextureFilter::Linear),
-                                });
-                            } else {
-                                let yeni_doku = ctx.load_texture(
-                                    format!("sekme_{}", hedef_id),
-                                    goruntu,
-                                    egui::TextureOptions {
-                                        magnification: egui::TextureFilter::Linear,
-                                        minification: egui::TextureFilter::Linear,
-                                        wrap_mode: egui::TextureWrapMode::ClampToEdge,
-                                        mipmap_mode: Some(egui::TextureFilter::Linear),
-                                    },
-                                );
-                                sekme.doku = Some(yeni_doku);
-                            }
-                        }
-                        RenderSonuc::KucukResimHazir {
-                            sayfa_no, goruntu, ..
-                        } => {
-                            let kucuk_doku = ctx.load_texture(
-                                format!("kr_{}_{}", hedef_id, sayfa_no),
-                                goruntu,
-                                egui::TextureOptions {
-                                    magnification: egui::TextureFilter::Linear,
-                                    minification: egui::TextureFilter::Linear,
-                                    wrap_mode: egui::TextureWrapMode::ClampToEdge,
-                                    mipmap_mode: Some(egui::TextureFilter::Linear),
-                                },
-                            );
-                            sekme.kucuk_resimler.insert(sayfa_no, kucuk_doku);
-                        }
-                        RenderSonuc::SayfaMetniHazir { metin, .. } => {
-                            sekme.sayfa_metni = metin;
-                            sekme.metin_yukleniyor = false;
-                        }
-                        RenderSonuc::AramaTamamlandi { sonuclar, .. } => {
-                            sekme.arama_sonuclari = sonuclar;
-                            sekme.arama_yapiliyor = false;
-                        }
-                        RenderSonuc::IcindekilerHazir { icindekiler, .. } => {
-                            sekme.icindekiler = icindekiler;
-                        }
-                        RenderSonuc::Hatali { mesaj, .. } => {
-                            sekme.yukleniyor = false;
-                            sekme.hata_mesaji = Some(mesaj);
-                        }
-                    }
-                    break 'dis;
+        self.dongu_basladi = true;
+        cx.spawn(async move |this, cx| loop {
+            cx.background_executor()
+                .timer(Duration::from_millis(40))
+                .await;
+            let devam = this.update(cx, |this, cx| {
+                let degisti_1 = this.sonuclari_isle(cx);
+                let degisti_2 = this.bekleyenleri_isle(cx);
+                if degisti_1 || degisti_2 {
+                    cx.notify();
                 }
+            });
+            if devam.is_err() {
+                break;
             }
+        })
+        .detach();
+    }
+
+    pub fn aktif_belge(&self) -> Option<&PdfSekme> {
+        let id = self.aktif_id?;
+        self.belgeler.iter().find(|b| b.id == id)
+    }
+
+    pub fn belge(&self, id: usize) -> Option<&PdfSekme> {
+        self.belgeler.iter().find(|b| b.id == id)
+    }
+
+    pub fn belge_mut(&mut self, id: usize) -> Option<&mut PdfSekme> {
+        self.belgeler.iter_mut().find(|b| b.id == id)
+    }
+
+    pub fn aktif_belge_mut(&mut self) -> Option<&mut PdfSekme> {
+        let id = self.aktif_id?;
+        self.belgeler.iter_mut().find(|b| b.id == id)
+    }
+
+    pub fn sekme_basligi(&self) -> String {
+        match self.aktif_belge() {
+            Some(belge) => format!("{} — SP GROUP PDF", belge.baslik),
+            None => "SP GROUP PDF Görüntüleyici".to_string(),
         }
     }
 
-    /// Dosya acma diyalogunu gosterir ve secilen dosyayi/dosyalari yeni sekmede acar.
-    fn dosya_ac_diyalogu(&mut self) {
+    pub fn dosya_sec(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(dosyalar) = FileDialog::new()
             .add_filter("PDF Belgesi", &["pdf"])
             .set_title("PDF Belgesi veya Belgeleri Seç")
             .pick_files()
         {
             for yol in dosyalar {
-                if let Some(yol_str) = yol.to_str() {
-                    self.yeni_sekme_ac(yol_str);
+                if let Some(yol) = yol.to_str() {
+                    self.dosya_ac(yol, window, cx);
                 }
             }
         }
     }
 
-    /// Aktif/Odaklanmış sekmeyi kapatır.
-    fn aktif_sekmeyi_kapat(&mut self) {
-        let main_surface = self.dock_state.main_surface_mut();
-        if let Some(leaf_idx) = main_surface.focused_leaf() {
-            if let Node::Leaf(leaf) = &mut main_surface[leaf_idx] {
-                if !leaf.tabs.is_empty() {
-                    let tab_idx = leaf.active;
-                    let path = egui_dock::TabPath::new(
-                        egui_dock::SurfaceIndex::main(),
-                        leaf_idx,
-                        tab_idx,
-                    );
-                    self.dock_state.remove_tab(path);
-                }
-            }
+    pub fn dosya_ac(&mut self, yol: &str, window: &mut Window, cx: &mut Context<Self>) {
+        if !pdf_mi(yol) {
+            self.bildir("Yalnızca PDF belgeleri açılabilir.", BildirimTuru::Hata, cx);
+            return;
+        }
+        self.ekran_olcegi = window.scale_factor();
+        self.sonraki_id += 1;
+        let baslik = Path::new(yol)
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("Belge")
+            .to_string();
+        let sekme = PdfSekme::yeni(self.sonraki_id, baslik, yol.to_string(), self.ekran_olcegi);
+        let id = sekme.id;
+        self.belgeler.push(sekme);
+        self.aktif_id = Some(id);
+        self.ayarlar.dosya_ekle(yol);
+        self.sayfa_girdisi_guncelle = true;
+        self.arama_girdisi_guncelle = true;
+        self.kenar_modu = KenarModu::Icindekiler;
+        self.kenar_acik = true;
+        self.icindekiler_talebi_gonder(id);
+        self.render_talebi_gonder_id(id, cx);
+        window.set_window_title(&self.sekme_basligi());
+        window.focus(&self.odak, cx);
+        cx.notify();
+    }
+
+    pub fn sekmeye_gec(&mut self, id: usize, window: &mut Window, cx: &mut Context<Self>) {
+        if self.belgeler.iter().any(|b| b.id == id) {
+            self.aktif_id = Some(id);
+            self.sayfa_girdisi_guncelle = true;
+            self.arama_girdisi_guncelle = true;
+            window.set_window_title(&self.sekme_basligi());
+            window.focus(&self.odak, cx);
+            cx.notify();
         }
     }
-}
 
-impl eframe::App for GoruntuleyiciUygulama {
-    // eframe öntanımlı temizleme rengi near-siyahtır; ilk karede ve pencere
-    // yeniden boyutlanırken palet zemini görünmesi için geçersiz kılınır.
-    fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
-        zemin_rengi(self.koyu_tema).to_normalized_gamma_f32()
+    pub fn sekme_kapat(&mut self, id: usize, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(konum) = self.belgeler.iter().position(|b| b.id == id) else {
+            return;
+        };
+        self.belgeler.remove(konum);
+        if self.aktif_id == Some(id) {
+            self.aktif_id = self
+                .belgeler
+                .get(konum)
+                .or_else(|| self.belgeler.last())
+                .map(|b| b.id);
+            self.sayfa_girdisi_guncelle = true;
+            self.arama_girdisi_guncelle = true;
+            window.set_window_title(&self.sekme_basligi());
+        }
+        if self.belgeler.is_empty() {
+            self.kenar_acik = false;
+            self.hakkinda_acik = false;
+            self.son_dosyalar_acik = false;
+        }
+        cx.notify();
     }
 
-    fn ui(&mut self, ui: &mut egui::Ui, _cerceve: &mut eframe::Frame) {
-        let ctx = ui.ctx().clone();
-
-        // Ilk frame'de, pencere gorunur olduktan sonra maximize uygula.
-        // (Gizli pencerede maximize Windows'ta sag kenarda bosluk birakiyordu.)
-        if self.ilk_cerceve {
-            self.ilk_cerceve = false;
-            ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(true));
+    pub fn aktif_sekmeyi_kapat(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(id) = self.aktif_id {
+            self.sekme_kapat(id, window, cx);
         }
-
-        self.ekran_olcegi = ctx.pixels_per_point();
-
-        tema_uygula(&ctx, self.koyu_tema);
-        hakkinda_penceresi(&ctx, &mut self.hakkinda_acok);
-
-        // 1) Arka plandan gelen render sonuclarini topla
-        if self.sonuclari_uygula(&ctx) {
-            ctx.request_repaint();
-        }
-
-        // 2) Sürükle - Bırak (Drag & Drop) dosya desteği
-        let birakilan_dosyalar = ctx.input(|i| i.raw.dropped_files.clone());
-        if !birakilan_dosyalar.is_empty() {
-            for dosya in birakilan_dosyalar {
-                if let Some(yol) = dosya.path {
-                    if yol.extension().and_then(|e| e.to_str()).map(|e| e.to_lowercase()) == Some("pdf".to_string()) {
-                        if let Some(yol_str) = yol.to_str() {
-                            self.yeni_sekme_ac(yol_str);
-                        }
-                    }
-                }
-            }
-        }
-
-        // 3) Global Klavye Kısayolları
-        ctx.input(|giris| {
-            if giris.modifiers.ctrl && giris.key_pressed(egui::Key::O) {
-                self.dosya_ac_diyalogu();
-            }
-            if giris.modifiers.ctrl && giris.key_pressed(egui::Key::W) {
-                self.aktif_sekmeyi_kapat();
-            }
-        });
-
-        // 4) Merkez: kök Ui arka plan boyamaz; palet zemini tek panel dolgusundan gelir.
-        egui::CentralPanel::default()
-            .frame(egui::Frame::new().fill(ui.visuals().panel_fill))
-            .show_inside(ui, |ui| self.ana_alan_ciz(ui));
     }
-}
 
-impl GoruntuleyiciUygulama {
-    /// Menü çubuğu ve merkez alanı (karşılama ekranı ya da sekmeli dock) burada çizilir.
-    #[allow(deprecated)]
-    fn ana_alan_ciz(&mut self, ui: &mut egui::Ui) {
-        let ctx = ui.ctx().clone();
+    pub fn sayfa_girisi_uygula(&mut self, metin: &str, cx: &mut Context<Self>) {
+        let Some(id) = self.aktif_id else {
+            return;
+        };
+        let toplam = self.belge(id).map(|b| b.toplam_sayfa).unwrap_or(0);
+        if let Ok(sayfa) = metin.trim().parse::<u32>() {
+            if sayfa >= 1 && sayfa <= toplam {
+                self.sayfaya_git(id, sayfa - 1, cx);
+                return;
+            }
+        }
+        self.sayfa_girdisi_guncelle = true;
+        cx.notify();
+    }
 
-        egui::menu::bar(ui, |ui| {
-            ui.menu_button("Dosya", |ui| {
-                if ui.button("📂 Belge Aç... (Ctrl+O)").clicked() {
-                    ui.close();
-                    self.dosya_ac_diyalogu();
-                }
-
-                ui.menu_button("📄 Son Açılan Dosyalar", |ui| {
-                    if self.ayarlar.son_dosyalar.is_empty() {
-                        ui.label("Son açılan dosya yok");
-                    } else {
-                        let mut acilacak_yol = None;
-                        for yol in &self.ayarlar.son_dosyalar {
-                            let dosya_adi = Path::new(yol)
-                                .file_name()
-                                .and_then(|s| s.to_str())
-                                .unwrap_or(yol);
-                            if ui.button(dosya_adi).on_hover_text(yol).clicked() {
-                                acilacak_yol = Some(yol.clone());
-                                ui.close();
-                            }
-                        }
-                        if let Some(yol) = acilacak_yol {
-                            self.yeni_sekme_ac(&yol);
-                        }
-                    }
-                });
-
-                ui.separator();
-                if ui.button("❌ Sekmeyi Kapat (Ctrl+W)").clicked() {
-                    ui.close();
-                    self.aktif_sekmeyi_kapat();
-                }
-                if ui.button("🚪 Çıkış").clicked() {
-                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-                }
-            });
-
-            ui.menu_button("Yardım", |ui| {
-                ui.label(egui::RichText::new("Klavye Kısayolları:").strong());
-                ui.label("• Ctrl + O : PDF Belgesi Aç");
-                ui.label("• Ctrl + W : Aktif Sekmeyi Kapat");
-                ui.label("• Ctrl + F : Metin Arama Paneli");
-                ui.label("• Sol / Sağ Ok, PgUp / PgDn : Sayfa Değiştir");
-                ui.label("• Home / End : İlk / Son Sayfaya Git");
-                ui.label("• Ctrl + Tekerlek : Akıcı Yakınlaştır / Uzaklaştır");
-                ui.label("• Ctrl + 0 : Zum %100 Sıfırla");
-                ui.separator();
-                if ui.button("ℹ Hakkında").clicked() {
-                    self.hakkinda_acok = true;
-                    ui.close();
-                }
-            });
-
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                // Emoji yerine mevcut tema metni; dokunmatik uyumlu büyük buton.
-                let tema_metin = if self.koyu_tema { "Koyu Tema" } else { "Açık Tema" };
-                let tema_buton = egui::Button::new(tema_metin).min_size(egui::vec2(110.0, DOKUNMA_HEDEFI));
-                if ui.add(tema_buton).on_hover_text("Tema Değiştir").clicked() {
-                    self.koyu_tema = !self.koyu_tema;
-                    UygulamaAyarlari::tema_kaydet(self.koyu_tema);
-                }
-            });
-        });
-
-        // 5) Merkez: Hosgeldin ekrani veya Sekmeli Dock Alani
-        if self.dock_state.main_surface().num_tabs() == 0 {
-            // Dikey/yatay responsive: içerik küçük ekranda kaydırılabilir, üst boşluk yüksekliğe orantılı.
-            egui::ScrollArea::both()
-                .auto_shrink([false, false])
-                .show(ui, |ui| {
-                    ui.vertical_centered(|ui| {
-                        ui.add_space((ui.available_height() * 0.30).clamp(24.0, 96.0));
-                        ui.heading(egui::RichText::new("SP GROUP PDF Görüntüleyici").size(28.0).strong());
-                        ui.add_space(12.0);
-                        ui.label(egui::RichText::new("Hızlı, güvenli ve kararlı PDF okuma deneyimi").weak());
-                        ui.add_space(24.0);
-
-                        if ui.button(egui::RichText::new("📂  Belge Aç...").size(16.0)).clicked() {
-                            self.dosya_ac_diyalogu();
-                        }
-                        ui.add_space(8.0);
-                        ui.label(egui::RichText::new("veya PDF dosyalarını pencereye sürükleyip bırakın").weak());
-                        ui.add_space(24.0);
-                        ui.label(egui::RichText::new(format!("Sürüm {}", SURUM))
-                            .size(11.0)
-                            .color(ui.visuals().weak_text_color()));
-                        ui.label(egui::RichText::new(FIRMA).size(11.0).color(ui.visuals().weak_text_color()));
-
-                        if !self.ayarlar.son_dosyalar.is_empty() {
-                            ui.add_space(36.0);
-                            ui.label(egui::RichText::new("Son Açılan Belgeler").strong());
-                            ui.add_space(10.0);
-
-                            let mut acilacak_yol = None;
-                            for yol in &self.ayarlar.son_dosyalar {
-                                let dosya_adi = Path::new(yol)
-                                    .file_name()
-                                    .and_then(|s| s.to_str())
-                                    .unwrap_or(yol);
-
-                                if ui.button(format!("📄 {}", dosya_adi)).on_hover_text(yol).clicked() {
-                                    acilacak_yol = Some(yol.clone());
-                                }
-                            }
-                            if let Some(yol) = acilacak_yol {
-                                self.yeni_sekme_ac(&yol);
-                            }
-                        }
-                    });
-                });
-        } else {
-            let mut tab_goruntuleyici = SekmeGoruntuleyici {
-                talep_gonderici: &self.talep_gonderici,
-                ekran_olcegi: self.ekran_olcegi,
+    pub fn sayfaya_git(&mut self, id: usize, yeni_sayfa: u32, cx: &mut Context<Self>) {
+        let gecersiz = {
+            let Some(sekme) = self.belge_mut(id) else {
+                return;
             };
-            // Sekme çubuğu da dokunmatik hedefle aynı yükseklikte olur.
-            let mut dock_stili = DockStili::from_egui(ui.style());
-            dock_stili.tab_bar.height = DOKUNMA_HEDEFI;
-            DockArea::new(&mut self.dock_state)
-                .style(dock_stili)
-                .show_inside(ui, &mut tab_goruntuleyici);
+            if sekme.toplam_sayfa == 0
+                || yeni_sayfa >= sekme.toplam_sayfa
+                || yeni_sayfa == sekme.simdiki_sayfa
+            {
+                true
+            } else {
+                sekme.simdiki_sayfa = yeni_sayfa;
+                sekme.goruntu = None;
+                sekme.yukleniyor = true;
+                sekme.hata_mesaji = None;
+                sekme.kaydirma.set_offset(point(px(0.), px(0.)));
+                false
+            }
+        };
+        if gecersiz {
+            return;
         }
-    }
-}
-
-/// Sekmelerin ekrana cizimini ve etkilesimlerini yonetir (egui_dock TabViewer).
-struct SekmeGoruntuleyici<'a> {
-    talep_gonderici: &'a Sender<IslemTalebi>,
-    ekran_olcegi: f32,
-}
-
-impl<'a> SekmeGoruntuleyici<'a> {
-    /// Sekme icin render talebini isci kanalina gonderir.
-    fn render_talebi_gonder(&self, sekme: &PdfSekme) {
-        let _ = self.talep_gonderici.send(IslemTalebi::Render(RenderTalebi {
-            sekme_id: sekme.id,
-            dosya_yolu: sekme.dosya_yolu.clone(),
-            sayfa_no: sekme.simdiki_sayfa,
-            zum: sekme.zum,
-            dpi_carpan: DPI_CARPANI,
-            ekran_olcegi: self.ekran_olcegi,
-        }));
-    }
-
-    /// Küçük resim talebi gönderir
-    fn kucuk_resim_talebi_gonder(&self, sekme: &PdfSekme, sayfa_no: u32) {
-        let _ = self.talep_gonderici.send(IslemTalebi::KucukResimRender {
-            sekme_id: sekme.id,
-            dosya_yolu: sekme.dosya_yolu.clone(),
-            sayfa_no,
-        });
-    }
-
-    /// Sayfa metni talebi gönderir
-    fn sayfa_metni_talebi_gonder(&self, sekme: &mut PdfSekme) {
-        sekme.metin_yukleniyor = true;
-        let _ = self.talep_gonderici.send(IslemTalebi::SayfaMetniAl {
-            sekme_id: sekme.id,
-            dosya_yolu: sekme.dosya_yolu.clone(),
-            sayfa_no: sekme.simdiki_sayfa,
-        });
-    }
-
-    /// Arama talebini gönderir
-    fn arama_talebi_gonder(&self, sekme: &mut PdfSekme) {
-        if !sekme.arama_metni.trim().is_empty() {
-            sekme.arama_yapiliyor = true;
-            let _ = self.talep_gonderici.send(IslemTalebi::MetinArama {
-                sekme_id: sekme.id,
-                dosya_yolu: sekme.dosya_yolu.clone(),
-                aranan: sekme.arama_metni.clone(),
-            });
+        self.sayfa_girdisi_guncelle = true;
+        self.render_talebi_gonder_id(id, cx);
+        if self.kenar_modu == KenarModu::Metin {
+            self.metin_talebi_gonder(id, cx);
         }
+        cx.notify();
     }
 
-    /// Zum seviyesini günceller.
-    fn zum_ayarla(&self, sekme: &mut PdfSekme, yeni_zum: f32) {
-        let sinirli_zum = yeni_zum.clamp(0.2, 20.0);
-        if (sekme.zum - sinirli_zum).abs() > 0.001 {
-            sekme.zum = sinirli_zum;
+    pub fn sayfa_ileri(&mut self, ileri: bool, cx: &mut Context<Self>) {
+        let Some(sekme) = self.aktif_belge() else {
+            return;
+        };
+        let id = sekme.id;
+        let mevcut = sekme.simdiki_sayfa;
+        let toplam = sekme.toplam_sayfa;
+        if toplam == 0 {
+            return;
+        }
+        let hedef = if ileri {
+            (mevcut + 1).min(toplam - 1)
+        } else {
+            mevcut.saturating_sub(1)
+        };
+        self.sayfaya_git(id, hedef, cx);
+    }
+
+    pub fn ilk_veya_son_sayfa(&mut self, son: bool, cx: &mut Context<Self>) {
+        let Some(sekme) = self.aktif_belge() else {
+            return;
+        };
+        let id = sekme.id;
+        let toplam = sekme.toplam_sayfa;
+        if toplam == 0 {
+            return;
+        }
+        let hedef = if son { toplam - 1 } else { 0 };
+        self.sayfaya_git(id, hedef, cx);
+    }
+
+    pub fn zum_ayarla(&mut self, yeni_zum: f32, cx: &mut Context<Self>) {
+        let Some(sekme) = self.aktif_belge_mut() else {
+            return;
+        };
+        let sinirli = zum_sinirla(yeni_zum);
+        if (sekme.zum - sinirli).abs() < 0.001 {
+            return;
+        }
+        sekme.zum = sinirli;
+        sekme.sigdirma_modu = SigdirmaModu::Ozel;
+        sekme.otomatik_sigdir = false;
+        sekme.bekleyen_render = true;
+        sekme.son_zum_degisimi = Some(Instant::now());
+        sekme.render_nesli = sekme.render_nesli.wrapping_add(1);
+        sekme.yukleniyor = true;
+        cx.notify();
+    }
+
+    pub fn zum_carki(&mut self, delta_y: f32, cx: &mut Context<Self>) {
+        let Some(sekme) = self.aktif_belge() else {
+            return;
+        };
+        let carpan = if delta_y > 0.0 { 1.12 } else { 1.0 / 1.12 };
+        let yeni = sekme.zum * carpan;
+        self.zum_ayarla(yeni, cx);
+    }
+
+    pub fn zum_pinch(&mut self, delta: f32, cx: &mut Context<Self>) {
+        let Some(sekme) = self.aktif_belge() else {
+            return;
+        };
+        let yeni = sekme.zum * (1.0 + delta);
+        self.zum_ayarla(yeni, cx);
+    }
+
+    pub fn zum_sifirla(&mut self, cx: &mut Context<Self>) {
+        if let Some(sekme) = self.aktif_belge_mut() {
             sekme.sigdirma_modu = SigdirmaModu::Ozel;
-            sekme.yukleniyor = true;
-            self.render_talebi_gonder(sekme);
+        }
+        self.zum_ayarla(1.0, cx);
+    }
+
+    pub fn sigdir(&mut self, mod_: SigdirmaModu, cx: &mut Context<Self>) {
+        let Some(sekme) = self.aktif_belge() else {
+            return;
+        };
+        let id = sekme.id;
+        let alan = sekme.gorunum_alan.get();
+        let hedef = sigdirma_hesapla(alan, sekme.orjinal_genislik, sekme.orjinal_yukseklik, mod_);
+        if let Some(zum) = hedef {
+            if let Some(sekme) = self.belge_mut(id) {
+                sekme.zum = zum;
+                sekme.sigdirma_modu = mod_;
+                sekme.otomatik_sigdir = false;
+                sekme.bekleyen_render = true;
+                sekme.son_zum_degisimi = Some(Instant::now());
+                sekme.render_nesli = sekme.render_nesli.wrapping_add(1);
+                sekme.yukleniyor = true;
+            }
+            cx.notify();
         }
     }
 
-    /// Sayfa numarasını değiştirir.
-    fn sayfa_degistir(&self, sekme: &mut PdfSekme, yeni_sayfa: u32) {
-        if sekme.toplam_sayfa > 0 && yeni_sayfa < sekme.toplam_sayfa && yeni_sayfa != sekme.simdiki_sayfa {
-            sekme.simdiki_sayfa = yeni_sayfa;
-            sekme.sayfa_girdi_metni = (yeni_sayfa + 1).to_string();
-            sekme.yukleniyor = true;
-            self.render_talebi_gonder(sekme);
-            if sekme.sol_panel_modu == SolPanelModu::MetinKopyala {
-                self.sayfa_metni_talebi_gonder(sekme);
+    pub fn arama_yap_metin(&mut self, metin: String, cx: &mut Context<Self>) {
+        let Some(id) = self.aktif_id else {
+            return;
+        };
+        {
+            let Some(sekme) = self.belge_mut(id) else {
+                return;
+            };
+            sekme.arama_metni = metin.clone();
+            sekme.arama_sonuclari.clear();
+            sekme.arama_yapiliyor = !metin.trim().is_empty();
+        }
+        self.kenar_acik = true;
+        self.kenar_modu = KenarModu::Arama;
+        if !metin.trim().is_empty() {
+            if let Some(sekme) = self.belge(id) {
+                let _ = self.talep_gonderici.send(IslemTalebi::MetinArama {
+                    sekme_id: id,
+                    dosya_yolu: sekme.dosya_yolu.clone(),
+                    aranan: metin,
+                });
             }
+        }
+        cx.notify();
+    }
+
+    pub fn metin_yukle(&mut self, id: usize, cx: &mut Context<Self>) {
+        let gonder = {
+            let Some(sekme) = self.belge_mut(id) else {
+                return;
+            };
+            if sekme.metin_yukleniyor {
+                false
+            } else {
+                sekme.metin_yukleniyor = true;
+                true
+            }
+        };
+        if gonder {
+            if let Some(sekme) = self.belge(id) {
+                let _ = self.talep_gonderici.send(IslemTalebi::SayfaMetniAl {
+                    sekme_id: id,
+                    dosya_yolu: sekme.dosya_yolu.clone(),
+                    sayfa_no: sekme.simdiki_sayfa,
+                });
+            }
+            cx.notify();
+        }
+    }
+
+    pub fn kenar_modu_ayarla(
+        &mut self,
+        mod_: KenarModu,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.kenar_acik = true;
+        self.kenar_modu = mod_;
+        if mod_ == KenarModu::Arama {
+            let odak = self.arama_girdisi.read(cx).focus_handle(cx);
+            window.focus(&odak, cx);
+        }
+        if mod_ == KenarModu::Metin {
+            if let Some(id) = self.aktif_id {
+                self.metin_yukle(id, cx);
+            }
+        }
+        cx.notify();
+    }
+
+    pub fn tema_degistir(&mut self, cx: &mut Context<Self>) {
+        self.koyu_tema = !self.koyu_tema;
+        UygulamaAyarlari::tema_kaydet(self.koyu_tema);
+        tema::tema_uygula(cx, self.koyu_tema);
+        cx.notify();
+    }
+
+    pub fn metni_kopyala(&mut self, cx: &mut Context<Self>) {
+        let metin = self
+            .aktif_belge()
+            .map(|b| b.sayfa_metni.clone())
+            .unwrap_or_default();
+        if metin.is_empty() {
+            self.bildir("Kopyalanacak metin yok.", BildirimTuru::Hata, cx);
+            return;
+        }
+        cx.write_to_clipboard(ClipboardItem::new_string(metin));
+        self.bildir("Sayfa metni panoya kopyalandı.", BildirimTuru::Basari, cx);
+    }
+
+    pub fn bildir(&mut self, mesaj: impl Into<String>, tur: BildirimTuru, cx: &mut Context<Self>) {
+        self.bildirim_sayaci += 1;
+        let kimlik = self.bildirim_sayaci;
+        self.bildirim = Some(Bildirim {
+            mesaj: mesaj.into(),
+            tur,
+            kimlik,
+        });
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(BILDIRIM_SURESI).await;
+            let _ = this.update(cx, |this, cx| {
+                if this
+                    .bildirim
+                    .as_ref()
+                    .is_some_and(|bildirim| bildirim.kimlik == kimlik)
+                {
+                    this.bildirim = None;
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+        cx.notify();
+    }
+
+    fn icindekiler_talebi_gonder(&mut self, id: usize) {
+        let dosya_yolu = {
+            let Some(sekme) = self.belge_mut(id) else {
+                return;
+            };
+            sekme.icindekiler_yukleniyor = true;
+            sekme.dosya_yolu.clone()
+        };
+        let _ = self.talep_gonderici.send(IslemTalebi::IcindekilerAl {
+            sekme_id: id,
+            dosya_yolu,
+        });
+    }
+
+    fn metin_talebi_gonder(&mut self, id: usize, cx: &mut Context<Self>) {
+        let gonder = {
+            let Some(sekme) = self.belge_mut(id) else {
+                return;
+            };
+            if sekme.metin_yukleniyor {
+                false
+            } else {
+                sekme.metin_yukleniyor = true;
+                true
+            }
+        };
+        if gonder {
+            if let Some(sekme) = self.belge(id) {
+                let _ = self.talep_gonderici.send(IslemTalebi::SayfaMetniAl {
+                    sekme_id: id,
+                    dosya_yolu: sekme.dosya_yolu.clone(),
+                    sayfa_no: sekme.simdiki_sayfa,
+                });
+            }
+            cx.notify();
+        }
+    }
+
+    pub(crate) fn render_talebi_gonder_id(&mut self, id: usize, cx: &mut Context<Self>) {
+        let ekran_olcegi = self.ekran_olcegi;
+        let talep = {
+            let Some(sekme) = self.belge_mut(id) else {
+                return;
+            };
+            sekme.render_nesli = sekme.render_nesli.wrapping_add(1);
+            sekme.bekleyen_render = false;
+            sekme.son_zum_degisimi = None;
+            sekme.yukleniyor = true;
+            sekme.render_ekran_olcegi = ekran_olcegi;
+            RenderTalebi {
+                sekme_id: id,
+                nesil: sekme.render_nesli,
+                dosya_yolu: sekme.dosya_yolu.clone(),
+                sayfa_no: sekme.simdiki_sayfa,
+                zum: sekme.zum,
+                dpi_carpan: DPI_CARPANI,
+                ekran_olcegi,
+            }
+        };
+        let _ = self.talep_gonderici.send(IslemTalebi::Render(talep));
+        cx.notify();
+    }
+
+    fn bekleyenleri_isle(&mut self, cx: &mut Context<Self>) -> bool {
+        let hazir: Vec<usize> = self
+            .belgeler
+            .iter()
+            .filter(|sekme| {
+                sekme.bekleyen_render
+                    && sekme
+                        .son_zum_degisimi
+                        .is_some_and(|zaman| zaman.elapsed() >= ZUM_BEKLEME)
+            })
+            .map(|sekme| sekme.id)
+            .collect();
+        for id in &hazir {
+            self.render_talebi_gonder_id(*id, cx);
+        }
+        !hazir.is_empty()
+    }
+
+    fn sonuclari_isle(&mut self, cx: &mut Context<Self>) -> bool {
+        let mut degisti = false;
+        while let Ok(sonuc) = self.sonuc_alici.try_recv() {
+            if self.tek_sonuc_uygula(sonuc, cx) {
+                degisti = true;
+            }
+        }
+        degisti
+    }
+
+    fn tek_sonuc_uygula(&mut self, sonuc: RenderSonuc, cx: &mut Context<Self>) -> bool {
+        match sonuc {
+            RenderSonuc::Basarili {
+                sekme_id,
+                nesil,
+                sayfa_no,
+                toplam_sayfa,
+                orjinal_genislik,
+                orjinal_yukseklik,
+                goruntu,
+            } => {
+                let Some(sekme) = self.belge_mut(sekme_id) else {
+                    return false;
+                };
+                if nesil != sekme.render_nesli {
+                    return false;
+                }
+                let Some(render_goruntusu) = render_goruntusu(goruntu) else {
+                    sekme.yukleniyor = false;
+                    sekme.hata_mesaji = Some("Sayfa görüntüsü oluşturulamadı.".to_string());
+                    return true;
+                };
+                sekme.toplam_sayfa = toplam_sayfa;
+                sekme.simdiki_sayfa = sayfa_no;
+                sekme.orjinal_genislik = orjinal_genislik;
+                sekme.orjinal_yukseklik = orjinal_yukseklik;
+                sekme.goruntu = Some(render_goruntusu);
+                sekme.goruntu_sayfa = sayfa_no;
+                sekme.goruntu_zum = sekme.zum;
+                sekme.yukleniyor = false;
+                sekme.hata_mesaji = None;
+                self.sayfa_girdisi_guncelle = true;
+                true
+            }
+            RenderSonuc::KucukResimHazir {
+                sekme_id,
+                sayfa_no,
+                goruntu,
+            } => {
+                let Some(sekme) = self.belge_mut(sekme_id) else {
+                    return false;
+                };
+                sekme.kucuk_resim_bekleyen.remove(&sayfa_no);
+                if let Some(render_goruntusu) = render_goruntusu(goruntu) {
+                    sekme.kucuk_resimler.insert(sayfa_no, render_goruntusu);
+                    return true;
+                }
+                false
+            }
+            RenderSonuc::SayfaMetniHazir { sekme_id, metin } => {
+                let Some(sekme) = self.belge_mut(sekme_id) else {
+                    return false;
+                };
+                sekme.sayfa_metni = metin;
+                sekme.metin_yukleniyor = false;
+                true
+            }
+            RenderSonuc::AramaTamamlandi { sekme_id, sonuclar } => {
+                let Some(sekme) = self.belge_mut(sekme_id) else {
+                    return false;
+                };
+                sekme.arama_sonuclari = sonuclar;
+                sekme.arama_yapiliyor = false;
+                true
+            }
+            RenderSonuc::IcindekilerHazir {
+                sekme_id,
+                icindekiler,
+            } => {
+                let Some(sekme) = self.belge_mut(sekme_id) else {
+                    return false;
+                };
+                sekme.icindekiler = icindekiler;
+                sekme.icindekiler_yukleniyor = false;
+                true
+            }
+            RenderSonuc::Hatali {
+                sekme_id,
+                nesil,
+                mesaj,
+            } => {
+                if let Some(nesil) = nesil {
+                    let Some(sekme) = self.belge_mut(sekme_id) else {
+                        return false;
+                    };
+                    if nesil != sekme.render_nesli {
+                        return false;
+                    }
+                    sekme.yukleniyor = false;
+                    sekme.hata_mesaji = Some(mesaj);
+                    return true;
+                }
+                self.bildir(mesaj, BildirimTuru::Hata, cx);
+                true
+            }
+        }
+    }
+
+    pub fn kucuk_resim_iste(&mut self, sekme_id: usize, sayfa_no: u32) -> bool {
+        let gonder = {
+            let Some(sekme) = self.belge_mut(sekme_id) else {
+                return false;
+            };
+            !sekme.kucuk_resimler.contains_key(&sayfa_no)
+                && sekme.kucuk_resim_bekleyen.insert(sayfa_no)
+        };
+        if gonder {
+            if let Some(sekme) = self.belge(sekme_id) {
+                let _ = self.talep_gonderici.send(IslemTalebi::KucukResimRender {
+                    sekme_id,
+                    dosya_yolu: sekme.dosya_yolu.clone(),
+                    sayfa_no,
+                });
+            }
+        }
+        gonder
+    }
+
+    pub fn girdi_odakta(&self, window: &Window, cx: &App) -> bool {
+        self.sayfa_girdisi
+            .read(cx)
+            .focus_handle(cx)
+            .is_focused(window)
+            || self
+                .arama_girdisi
+                .read(cx)
+                .focus_handle(cx)
+                .is_focused(window)
+    }
+
+    pub fn eylem_dosya_ac(&mut self, _: &DosyaAc, window: &mut Window, cx: &mut Context<Self>) {
+        self.dosya_sec(window, cx);
+    }
+
+    pub fn eylem_son_dosyalar(&mut self, _: &SonDosyalar, _: &mut Window, cx: &mut Context<Self>) {
+        self.son_dosyalar_acik = !self.son_dosyalar_acik;
+        self.hakkinda_acik = false;
+        cx.notify();
+    }
+
+    pub fn eylem_sekme_kapat(
+        &mut self,
+        _: &SekmeKapat,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.aktif_sekmeyi_kapat(window, cx);
+    }
+
+    pub fn eylem_cikis(&mut self, _: &Cikis, _: &mut Window, cx: &mut Context<Self>) {
+        cx.quit();
+    }
+
+    pub fn eylem_kenar_paneli(
+        &mut self,
+        _: &KenarPaneli,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.kenar_acik = !self.kenar_acik;
+        if self.kenar_acik && self.kenar_modu == KenarModu::Arama {
+            let odak = self.arama_girdisi.read(cx).focus_handle(cx);
+            window.focus(&odak, cx);
+        }
+        cx.notify();
+    }
+
+    pub fn eylem_icindekiler(
+        &mut self,
+        _: &Icindekiler,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.kenar_modu_ayarla(KenarModu::Icindekiler, window, cx);
+    }
+
+    pub fn eylem_sayfalar(&mut self, _: &Sayfalar, window: &mut Window, cx: &mut Context<Self>) {
+        self.kenar_modu_ayarla(KenarModu::KucukResimler, window, cx);
+    }
+
+    pub fn eylem_arama_paneli(
+        &mut self,
+        _: &AramaPaneli,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.kenar_acik && self.kenar_modu == KenarModu::Arama {
+            self.kenar_acik = false;
+            window.focus(&self.odak, cx);
+            cx.notify();
+        } else {
+            self.kenar_modu_ayarla(KenarModu::Arama, window, cx);
+        }
+    }
+
+    pub fn eylem_metin_paneli(
+        &mut self,
+        _: &MetinPaneli,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.kenar_modu_ayarla(KenarModu::Metin, window, cx);
+    }
+
+    pub fn eylem_tema(&mut self, _: &TemaDegistir, _: &mut Window, cx: &mut Context<Self>) {
+        self.tema_degistir(cx);
+    }
+
+    pub fn eylem_yakinlastir(&mut self, _: &Yakinlastir, _: &mut Window, cx: &mut Context<Self>) {
+        if let Some(sekme) = self.aktif_belge() {
+            let yeni = sekme.zum + 0.25;
+            self.zum_ayarla(yeni, cx);
+        }
+    }
+
+    pub fn eylem_uzaklastir(&mut self, _: &Uzaklastir, _: &mut Window, cx: &mut Context<Self>) {
+        if let Some(sekme) = self.aktif_belge() {
+            let yeni = sekme.zum - 0.25;
+            self.zum_ayarla(yeni, cx);
+        }
+    }
+
+    pub fn eylem_zum_sifirla(&mut self, _: &ZumSifirla, _: &mut Window, cx: &mut Context<Self>) {
+        self.zum_sifirla(cx);
+    }
+
+    pub fn eylem_genislige_sigdir(
+        &mut self,
+        _: &GenisligeSigdir,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.sigdir(SigdirmaModu::Genislik, cx);
+    }
+
+    pub fn eylem_sayfaya_sigdir(
+        &mut self,
+        _: &SayfayaSigdir,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.sigdir(SigdirmaModu::Sayfa, cx);
+    }
+
+    pub fn eylem_onceki_sayfa(
+        &mut self,
+        _: &OncekiSayfa,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.girdi_odakta(window, cx) {
+            self.sayfa_ileri(false, cx);
+        }
+    }
+
+    pub fn eylem_sonraki_sayfa(
+        &mut self,
+        _: &SonrakiSayfa,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.girdi_odakta(window, cx) {
+            self.sayfa_ileri(true, cx);
+        }
+    }
+
+    pub fn eylem_ilk_sayfa(&mut self, _: &IlkSayfa, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.girdi_odakta(window, cx) {
+            self.ilk_veya_son_sayfa(false, cx);
+        }
+    }
+
+    pub fn eylem_son_sayfa(&mut self, _: &SonSayfa, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.girdi_odakta(window, cx) {
+            self.ilk_veya_son_sayfa(true, cx);
+        }
+    }
+
+    pub fn eylem_hakkinda(&mut self, _: &Hakkinda, _: &mut Window, cx: &mut Context<Self>) {
+        self.hakkinda_acik = !self.hakkinda_acik;
+        self.son_dosyalar_acik = false;
+        cx.notify();
+    }
+
+    pub fn eylem_yeniden_dene(&mut self, _: &YenidenDene, _: &mut Window, cx: &mut Context<Self>) {
+        if let Some(id) = self.aktif_id {
+            if let Some(sekme) = self.belge_mut(id) {
+                sekme.hata_mesaji = None;
+                sekme.goruntu = None;
+            }
+            self.render_talebi_gonder_id(id, cx);
+        }
+    }
+
+    pub fn eylem_kaplama_kapat(
+        &mut self,
+        _: &KaplamaKapat,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.hakkinda_acik || self.son_dosyalar_acik {
+            self.hakkinda_acik = false;
+            self.son_dosyalar_acik = false;
+            cx.notify();
         }
     }
 }
 
-impl<'a> TabViewer for SekmeGoruntuleyici<'a> {
-    type Tab = PdfSekme;
+pub fn pdf_mi(yol: &str) -> bool {
+    Path::new(yol)
+        .extension()
+        .and_then(|uzanti| uzanti.to_str())
+        .is_some_and(|uzanti| uzanti.eq_ignore_ascii_case("pdf"))
+}
 
-    fn title(&mut self, sekme: &mut Self::Tab) -> egui::WidgetText {
-        egui::WidgetText::from(sekme.baslik.clone())
-    }
+fn render_goruntusu(goruntu: SayfaGoruntusu) -> Option<Arc<RenderImage>> {
+    let tampon = image::RgbaImage::from_raw(goruntu.genislik, goruntu.yukseklik, goruntu.rgba)?;
+    Some(Arc::new(RenderImage::new(vec![image::Frame::new(tampon)])))
+}
 
-    fn ui(&mut self, ui: &mut egui::Ui, sekme: &mut Self::Tab) {
-        egui::CentralPanel::default().show_inside(ui, |ui| {
-            let mut render_gerekli = false;
+fn logo_yukle() -> Option<Arc<RenderImage>> {
+    let resim = image::load_from_memory(include_bytes!("../assets/logo.png"))
+        .ok()?
+        .to_rgba8();
+    let (genislik, yukseklik) = resim.dimensions();
+    render_goruntusu(SayfaGoruntusu {
+        genislik,
+        yukseklik,
+        rgba: resim.into_raw(),
+    })
+}
 
-        // Sekmeye özel Klavye Kısayolları
-        ui.input(|i| {
-            if i.key_pressed(egui::Key::ArrowLeft) || i.key_pressed(egui::Key::PageUp) {
-                if sekme.simdiki_sayfa > 0 {
-                    sekme.simdiki_sayfa -= 1;
-                    sekme.sayfa_girdi_metni = (sekme.simdiki_sayfa + 1).to_string();
-                    render_gerekli = true;
-                }
-            }
-            if i.key_pressed(egui::Key::ArrowRight) || i.key_pressed(egui::Key::PageDown) {
-                if sekme.toplam_sayfa > 0 && sekme.simdiki_sayfa + 1 < sekme.toplam_sayfa {
-                    sekme.simdiki_sayfa += 1;
-                    sekme.sayfa_girdi_metni = (sekme.simdiki_sayfa + 1).to_string();
-                    render_gerekli = true;
-                }
-            }
-            if i.key_pressed(egui::Key::Home) {
-                if sekme.simdiki_sayfa != 0 {
-                    sekme.simdiki_sayfa = 0;
-                    sekme.sayfa_girdi_metni = "1".to_string();
-                    render_gerekli = true;
-                }
-            }
-            if i.key_pressed(egui::Key::End) {
-                if sekme.toplam_sayfa > 0 && sekme.simdiki_sayfa + 1 != sekme.toplam_sayfa {
-                    sekme.simdiki_sayfa = sekme.toplam_sayfa - 1;
-                    sekme.sayfa_girdi_metni = sekme.toplam_sayfa.to_string();
-                    render_gerekli = true;
-                }
-            }
-            if i.modifiers.ctrl && i.key_pressed(egui::Key::F) {
-                sekme.sol_panel_modu = if sekme.sol_panel_modu == SolPanelModu::Arama {
-                    SolPanelModu::Kapali
-                } else {
-                    SolPanelModu::Arama
-                };
-            }
-            if i.modifiers.ctrl && (i.key_pressed(egui::Key::Equals) || i.key_pressed(egui::Key::Plus)) {
-                sekme.zum = (sekme.zum + 0.25).min(20.0);
-                sekme.sigdirma_modu = SigdirmaModu::Ozel;
-                render_gerekli = true;
-            }
-            if i.modifiers.ctrl && i.key_pressed(egui::Key::Minus) {
-                sekme.zum = (sekme.zum - 0.25).max(0.2);
-                sekme.sigdirma_modu = SigdirmaModu::Ozel;
-                render_gerekli = true;
-            }
-            if i.modifiers.ctrl && i.key_pressed(egui::Key::Num0) {
-                sekme.zum = 1.0;
-                sekme.sigdirma_modu = SigdirmaModu::Ozel;
-                render_gerekli = true;
-            }
-        });
-
-        if render_gerekli {
-            sekme.yukleniyor = true;
-            self.render_talebi_gonder(sekme);
-        }
-
-        // --- UST KONTROL CUBUĞU ---
-        // Sığdırma isteği burada toplanır; zum, araç çubuğu çizildikten sonra
-        // kalan gerçek görünüm alanına göre uygulanır (dikey/yatay responsive).
-        let mut sigdirma_istegi: Option<SigdirmaModu> = None;
-
-        ui.horizontal_wrapped(|ui| {
-            // Sol Yan Panel Butonları
-            if ui
-                .selectable_label(sekme.sol_panel_modu == SolPanelModu::Icindekiler, "📑 İçindekiler")
-                .clicked()
-            {
-                sekme.sol_panel_modu = if sekme.sol_panel_modu == SolPanelModu::Icindekiler {
-                    SolPanelModu::Kapali
-                } else {
-                    SolPanelModu::Icindekiler
-                };
-            }
-
-            if ui
-                .selectable_label(sekme.sol_panel_modu == SolPanelModu::KucukResimler, "🖼 Sayfalar")
-                .clicked()
-            {
-                sekme.sol_panel_modu = if sekme.sol_panel_modu == SolPanelModu::KucukResimler {
-                    SolPanelModu::Kapali
-                } else {
-                    SolPanelModu::KucukResimler
-                };
-            }
-
-            if ui
-                .selectable_label(sekme.sol_panel_modu == SolPanelModu::Arama, "🔍 Ara (Ctrl+F)")
-                .clicked()
-            {
-                sekme.sol_panel_modu = if sekme.sol_panel_modu == SolPanelModu::Arama {
-                    SolPanelModu::Kapali
-                } else {
-                    SolPanelModu::Arama
-                };
-            }
-
-            if ui
-                .selectable_label(sekme.sol_panel_modu == SolPanelModu::MetinKopyala, "📋 Metin Al")
-                .clicked()
-            {
-                if sekme.sol_panel_modu == SolPanelModu::MetinKopyala {
-                    sekme.sol_panel_modu = SolPanelModu::Kapali;
-                } else {
-                    sekme.sol_panel_modu = SolPanelModu::MetinKopyala;
-                    self.sayfa_metni_talebi_gonder(sekme);
-                }
-            }
-
-            ui.separator();
-
-            // Sayfa Navigasyonu
-            ui.add_enabled_ui(sekme.simdiki_sayfa > 0, |ui| {
-                if ui.button("◀").on_hover_text("Önceki Sayfa").clicked() {
-                    self.sayfa_degistir(sekme, sekme.simdiki_sayfa - 1);
-                }
-            });
-
-            ui.label("Sayfa");
-            let sayfa_girdi = ui.add_sized(
-                egui::vec2(48.0, DOKUNMA_HEDEFI),
-                egui::TextEdit::singleline(&mut sekme.sayfa_girdi_metni)
-                    .horizontal_align(egui::Align::Center),
-            );
-
-            if sayfa_girdi.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                if let Ok(girilen_sayfa) = sekme.sayfa_girdi_metni.trim().parse::<u32>() {
-                    if girilen_sayfa >= 1 && girilen_sayfa <= sekme.toplam_sayfa {
-                        self.sayfa_degistir(sekme, girilen_sayfa - 1);
-                    } else {
-                        sekme.sayfa_girdi_metni = (sekme.simdiki_sayfa + 1).to_string();
-                    }
-                } else {
-                    sekme.sayfa_girdi_metni = (sekme.simdiki_sayfa + 1).to_string();
-                }
-            }
-
-            ui.label(format!("/ {}", sekme.toplam_sayfa.max(1)));
-
-            let son_sayfada = sekme.toplam_sayfa > 0 && sekme.simdiki_sayfa + 1 >= sekme.toplam_sayfa;
-            ui.add_enabled_ui(!son_sayfada, |ui| {
-                if ui.button("▶").on_hover_text("Sonraki Sayfa").clicked() {
-                    self.sayfa_degistir(sekme, sekme.simdiki_sayfa + 1);
-                }
-            });
-
-            ui.separator();
-
-            // Zum Kontrolleri
-            ui.add_enabled_ui(sekme.zum > 0.2, |ui| {
-                if ui.button("➖").on_hover_text("Uzaklaştır").clicked() {
-                    self.zum_ayarla(sekme, sekme.zum - 0.25);
-                }
-            });
-
-            ui.label(format!("%{:.0}", sekme.zum * 100.0));
-
-            ui.add_enabled_ui(sekme.zum < 20.0, |ui| {
-                if ui.button("➕").on_hover_text("Yakınlaştır").clicked() {
-                    self.zum_ayarla(sekme, sekme.zum + 0.25);
-                }
-            });
-
-            ui.separator();
-
-            // Sığdırma Butonları
-            if ui
-                .selectable_label(sekme.sigdirma_modu == SigdirmaModu::Genislik, "Genişliğe Sığdır")
-                .clicked()
-            {
-                sigdirma_istegi = Some(SigdirmaModu::Genislik);
-            }
-
-            if ui
-                .selectable_label(sekme.sigdirma_modu == SigdirmaModu::Sayfa, "Sayfaya Sığdır")
-                .clicked()
-            {
-                sigdirma_istegi = Some(SigdirmaModu::Sayfa);
-            }
-
-            if sekme.zum != 1.0 && ui.button("100%").on_hover_text("Sıfırla").clicked() {
-                self.zum_ayarla(sekme, 1.0);
-            }
-        });
-
-        ui.separator();
-
-        // Sığdırma zumunu, araç çubuğu sonrası kalan görünüm alanına göre hesapla.
-        if let Some(mod_) = sigdirma_istegi {
-            if sekme.orjinal_genislik > 0.0 {
-                let alan = ui.available_size();
-                let zum_genislik = (alan.x - 32.0) / sekme.orjinal_genislik;
-                let zum = match mod_ {
-                    SigdirmaModu::Sayfa if sekme.orjinal_yukseklik > 0.0 => {
-                        zum_genislik.min((alan.y - 32.0) / sekme.orjinal_yukseklik)
-                    }
-                    _ => zum_genislik,
-                };
-                sekme.sigdirma_modu = mod_;
-                self.zum_ayarla(sekme, zum);
-            }
-        }
-
-        // --- SOL YAN PANEL & ANA GÖRÜNTÜ ALANI ---
-        // Sol Yan Panel
-        if sekme.sol_panel_modu != SolPanelModu::Kapali {
-            egui::Panel::left(format!("sol_panel_{}", sekme.id))
-                .resizable(true)
-                .default_size(240.0)
-                .show_inside(ui, |ui| {
-                    match sekme.sol_panel_modu {
-                        SolPanelModu::Icindekiler => {
-                            ui.heading("📑 İçindekiler");
-                            ui.separator();
-                            egui::ScrollArea::vertical().show(ui, |ui| {
-                                if sekme.icindekiler.is_empty() {
-                                    ui.label("İçindekiler yükleniyor veya bulunamadı.");
-                                } else {
-                                    let mut git_sayfa = None;
-                                    for oge in &sekme.icindekiler {
-                                        if ui
-                                            .button(format!("• {}", oge.baslik))
-                                            .on_hover_text(format!("Sayfa {}", oge.sayfa_no + 1))
-                                            .clicked()
-                                        {
-                                            git_sayfa = Some(oge.sayfa_no);
-                                        }
-                                    }
-                                    if let Some(s_no) = git_sayfa {
-                                        self.sayfa_degistir(sekme, s_no);
-                                    }
-                                }
-                            });
-                        }
-                        SolPanelModu::KucukResimler => {
-                            ui.heading("🖼 Sayfa Önizlemeleri");
-                            ui.separator();
-                            egui::ScrollArea::vertical().show(ui, |ui| {
-                                let mut git_sayfa = None;
-                                for s in 0..sekme.toplam_sayfa {
-                                    ui.vertical_centered(|ui| {
-                                        if let Some(kr_doku) = sekme.kucuk_resimler.get(&s) {
-                                            let btn = ui.add(
-                                                egui::Button::image((kr_doku.id(), egui::vec2(120.0, 160.0)))
-                                                    .selected(s == sekme.simdiki_sayfa),
-                                            );
-                                            if btn.clicked() {
-                                                git_sayfa = Some(s);
-                                            }
-                                        } else {
-                                            if ui
-                                                .button(format!("🖼 Sayfa {}", s + 1))
-                                                .clicked()
-                                            {
-                                                git_sayfa = Some(s);
-                                            }
-                                            self.kucuk_resim_talebi_gonder(sekme, s);
-                                        }
-                                        ui.label(format!("{}", s + 1));
-                                        ui.add_space(8.0);
-                                    });
-                                }
-                                if let Some(s_no) = git_sayfa {
-                                    self.sayfa_degistir(sekme, s_no);
-                                }
-                            });
-                        }
-                        SolPanelModu::MetinKopyala => {
-                            ui.heading("📋 Sayfa Metni");
-                            ui.separator();
-                            if sekme.metin_yukleniyor {
-                                ui.spinner();
-                                ui.label("Metin çıkarılıyor...");
-                            } else {
-                                if ui.button("📋 Panoya Kopyala").clicked() {
-                                    ui.ctx().copy_text(sekme.sayfa_metni.clone());
-                                }
-                                ui.separator();
-                                egui::ScrollArea::vertical().show(ui, |ui| {
-                                    ui.label(egui::RichText::new(&sekme.sayfa_metni).small());
-                                });
-                            }
-                        }
-                        SolPanelModu::Arama => {
-                            ui.heading("🔍 Belgede Ara");
-                            ui.separator();
-                            // Dokunmatik uyumlu: tam genişlik, 44px yükseklik; düğme altında ayrı satırda.
-                            let arama_edit = ui.add_sized(
-                                egui::vec2(ui.available_width(), DOKUNMA_HEDEFI),
-                                egui::TextEdit::singleline(&mut sekme.arama_metni)
-                                    .hint_text("Metin girin..."),
-                            );
-                            if ui.button("Ara").clicked()
-                                || (arama_edit.lost_focus()
-                                    && ui.input(|i| i.key_pressed(egui::Key::Enter)))
-                            {
-                                self.arama_talebi_gonder(sekme);
-                            }
-
-                            ui.add_space(8.0);
-                            egui::ScrollArea::vertical().show(ui, |ui| {
-                                if sekme.arama_yapiliyor {
-                                    ui.spinner();
-                                    ui.label("Aranıyor...");
-                                } else if sekme.arama_sonuclari.is_empty() {
-                                    if !sekme.arama_metni.is_empty() {
-                                        ui.label("Sonuç bulunamadı.");
-                                    }
-                                } else {
-                                    ui.label(format!("{} sonuç bulundu:", sekme.arama_sonuclari.len()));
-                                    ui.separator();
-                                    let mut secilen_sayfa = None;
-                                    for sonuc in &sekme.arama_sonuclari {
-                                        ui.vertical(|ui| {
-                                            if ui
-                                                .button(egui::RichText::new(format!(
-                                                    "Sayfa {}: {}",
-                                                    sonuc.sayfa_no + 1,
-                                                    sonuc.baglam
-                                                )).small())
-                                                .clicked()
-                                            {
-                                                secilen_sayfa = Some(sonuc.sayfa_no);
-                                            }
-                                        });
-                                        ui.separator();
-                                    }
-                                    if let Some(sayfa_no) = secilen_sayfa {
-                                        self.sayfa_degistir(sekme, sayfa_no);
-                                    }
-                                }
-                            });
-                        }
-                        _ => {}
-                    }
-                });
-        }
-
-        // PDF Görünüm Alanı (Kalan Tüm Ekranı Kaplayan Ortalanmış ScrollArea)
-        let _scroll_response = egui::ScrollArea::both()
-            .auto_shrink([false, false])
-            .show(ui, |ui| {
-                if let Some(hata) = &sekme.hata_mesaji {
-                    ui.vertical_centered(|ui| {
-                        ui.add_space(60.0);
-                        ui.colored_label(ui.visuals().error_fg_color, "⚠ Belge açılamadı");
-                        ui.add_space(8.0);
-                        ui.label(egui::RichText::new(hata).weak());
-                    });
-                } else if sekme.yukleniyor {
-                    ui.vertical_centered(|ui| {
-                        ui.add_space(60.0);
-                        ui.spinner();
-                        ui.label("Sayfa hazırlanıyor...");
-                    });
-                } else if let Some(doku) = &sekme.doku {
-                    let mevcud_genislik = ui.available_width();
-                    let gorunum_boyutu = egui::vec2(
-                        sekme.orjinal_genislik * sekme.zum,
-                        sekme.orjinal_yukseklik * sekme.zum,
-                    );
-                    let doku_genisligi = gorunum_boyutu.x;
-                    if mevcud_genislik > doku_genisligi {
-                        let sol_bosluk = (mevcud_genislik - doku_genisligi) / 2.0;
-                        ui.horizontal(|ui| {
-                            ui.add_space(sol_bosluk);
-                            ui.image((doku.id(), gorunum_boyutu));
-                        });
-                    } else {
-                        ui.image((doku.id(), gorunum_boyutu));
-                    }
-                } else {
-                    ui.label("Görüntü bulunamadı.");
-                }
-            });
-
-        // Fare Tekerleği ile Akıcı Zum (Ctrl + Scroll)
-        let ctrl_basili = ui.input(|i| i.modifiers.ctrl);
-        let scroll_delta = ui.input(|i| i.smooth_scroll_delta.y);
-        if scroll_delta.abs() > 1.0 && ctrl_basili {
-            let degisim = if scroll_delta > 0.0 { 0.1 } else { -0.1 };
-            self.zum_ayarla(sekme, sekme.zum + degisim);
-        }
-
-        // Parmakla sıkıştır/aç (pinch-to-zoom) — dokunmatik cihazlar için.
-        let zoom_delta = ui.input(|i| i.zoom_delta());
-        if (zoom_delta - 1.0).abs() > 0.001 {
-            self.zum_ayarla(sekme, sekme.zum * zoom_delta);
-        }
-        });
+pub fn baslik_cubugu_secenekleri() -> WindowOptions {
+    WindowOptions {
+        window_min_size: Some(size(px(PENCERE_MIN_GENISLIK), px(PENCERE_MIN_YUKSEKLIK))),
+        window_bounds: Some(WindowBounds::Maximized(Bounds::new(
+            point(px(80.), px(80.)),
+            size(px(PENCERE_GENISLIK), px(PENCERE_YUKSEKLIK)),
+        ))),
+        app_id: Some("spgroup_pdf_goruntuleyici".to_string()),
+        ..TitleBar::window_options()
     }
 }

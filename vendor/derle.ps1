@@ -1,4 +1,6 @@
 $env:PATH = "C:\Windows\Microsoft.NET\Framework64\v4.0.30319;C:\Program Files\LLVM\bin;" + $env:PATH
+$cmakeBin = "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin"
+if (Test-Path "$cmakeBin\cmake.exe") { $env:PATH = "$cmakeBin;" + $env:PATH }
 $env:LIBCLANG_PATH = "C:\Program Files\LLVM\bin"
 $env:CC = "C:\Program Files\LLVM\bin\clang-cl.exe"
 $env:CXX = "C:\Program Files\LLVM\bin\clang-cl.exe"

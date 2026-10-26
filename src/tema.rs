@@ -1,141 +1,194 @@
-// Koyu/açık tema paletleri ve dokunmatik stil uygulayıcısı.
-// Tek Palet yapısı her iki modu tanımlar; tüm widget durumları ve metin
-// katmanları tek yerden türetilir, böylece modlar arası uyum garantidir.
-use egui::{Color32, CornerRadius, Stroke, Visuals};
-use crate::sabitler::DOKUNMA_HEDEFI;
+use std::rc::Rc;
 
-struct Palet {
-    /// Ana panel/araç çubuğu zemini.
-    zemin: Color32,
-    /// Pencere, menü ve açılır kutu zemini.
-    pencere: Color32,
-    /// En koyu/açık zemin: kaydırma alanları, sekme çubuğu.
-    extreme: Color32,
-    /// Hafif farklı zemin: çizelge şeritleri, pasif düğmeler.
-    faint: Color32,
-    /// Birincil metin.
-    metin: Color32,
-    /// İkincil/yardımcı metin (her iki zeminde de okunur kontrastta).
-    metin_zayif: Color32,
-    /// Kurumsal vurgu (bağlantı, seçim, etkin kenarlık).
-    vurgu: Color32,
-    /// Üzerine gelinen düğme zemini.
-    hover: Color32,
-    /// Basılı/etkin düğme zemini.
-    aktif: Color32,
-    /// Ayraç ve pencere kenarlığı.
-    ayirici: Color32,
-    /// Metin seçimi zemini.
-    secim: Color32,
-    /// Hata metni (koyu zeminde açık, açık zeminde koyu ton).
-    hata: Color32,
-    /// Uyarı metni.
-    uyari: Color32,
-    /// Kod/metin düzenleme alanı zemini.
-    girinti: Color32,
+use gpui_kit::component::{Theme, ThemeConfig, ThemeMode};
+use gpui_kit::{App, Rgba};
+
+/// Belge tuvali: koyu modda sayfanın arkasındaki derin grafit.
+pub const TUVAL_KOYU: u32 = 0x0D1015;
+/// Belge tuvali: açık modda yumuşak gri.
+pub const TUVAL_ACIK: u32 = 0xE5E9EF;
+
+pub fn tuval_rengi(koyu: bool) -> Rgba {
+    gpui_kit::rgb(if koyu { TUVAL_KOYU } else { TUVAL_ACIK })
 }
 
-const KOYU: Palet = Palet {
-    // Lacivert ile gri arasında kurumsal grafit; saf siyah değil.
-    zemin: Color32::from_rgb(0x1E, 0x21, 0x28),
-    pencere: Color32::from_rgb(0x26, 0x2A, 0x33),
-    extreme: Color32::from_rgb(0x17, 0x1A, 0x20),
-    faint: Color32::from_rgb(0x2A, 0x2E, 0x38),
-    metin: Color32::from_rgb(0xE3, 0xE6, 0xEC),
-    metin_zayif: Color32::from_rgb(0x9A, 0xA3, 0xB0),
-    vurgu: Color32::from_rgb(0x5B, 0x9B, 0xD5),
-    hover: Color32::from_rgb(0x33, 0x38, 0x45),
-    aktif: Color32::from_rgb(0x3D, 0x44, 0x52),
-    ayirici: Color32::from_rgb(0x3A, 0x41, 0x50),
-    secim: Color32::from_rgb(0x34, 0x52, 0x7A),
-    hata: Color32::from_rgb(0xF2, 0x8B, 0x82),
-    uyari: Color32::from_rgb(0xFD, 0xD6, 0x63),
-    girinti: Color32::from_rgb(0x1A, 0x1D, 0x24),
-};
+fn yapilandirma(koyu: bool) -> ThemeConfig {
+    let mut yapilandirma = ThemeConfig {
+        is_default: true,
+        name: if koyu {
+            "SP Grafit Koyu".into()
+        } else {
+            "SP Grafit Açık".into()
+        },
+        mode: if koyu {
+            ThemeMode::Dark
+        } else {
+            ThemeMode::Light
+        },
+        font_size: Some(13.0),
+        font_family: Some("Segoe UI".into()),
+        mono_font_family: Some("Consolas".into()),
+        mono_font_size: Some(12.0),
+        radius: Some(6),
+        radius_lg: Some(10),
+        shadow: Some(true),
+        ..Default::default()
+    };
 
-const ACIK: Palet = Palet {
-    // Koyu paletin aynı kurumsal ailesinin aydınlık karşılığı.
-    zemin: Color32::from_rgb(0xF7, 0xF8, 0xFA),
-    pencere: Color32::WHITE,
-    extreme: Color32::from_rgb(0xEC, 0xEE, 0xF1),
-    faint: Color32::from_rgb(0xEE, 0xF0, 0xF3),
-    metin: Color32::from_rgb(0x23, 0x27, 0x2E),
-    metin_zayif: Color32::from_rgb(0x5F, 0x66, 0x72),
-    vurgu: Color32::from_rgb(0x3E, 0x7C, 0xB1),
-    hover: Color32::from_rgb(0xE4, 0xEB, 0xF3),
-    aktif: Color32::from_rgb(0xD8, 0xE2, 0xEF),
-    ayirici: Color32::from_rgb(0xC9, 0xCE, 0xD6),
-    secim: Color32::from_rgb(0xC9, 0xDA, 0xEE),
-    hata: Color32::from_rgb(0xB3, 0x26, 0x1E),
-    uyari: Color32::from_rgb(0x8A, 0x64, 0x00),
-    girinti: Color32::WHITE,
-};
-
-/// Paleti tam bir egui görseline dönüştürür; her iki mod aynı yoldan geçer.
-fn gorsel_olustur(p: &Palet, koyu: bool) -> Visuals {
-    let mut v = if koyu { Visuals::dark() } else { Visuals::light() };
-    let kenarlik = Stroke::new(1.0_f32, p.ayirici);
-
-    v.panel_fill = p.zemin;
-    v.window_fill = p.pencere;
-    v.extreme_bg_color = p.extreme;
-    v.faint_bg_color = p.faint;
-    v.text_edit_bg_color = Some(p.girinti);
-    v.code_bg_color = p.girinti;
-    v.weak_text_color = Some(p.metin_zayif);
-    v.hyperlink_color = p.vurgu;
-    v.warn_fg_color = p.uyari;
-    v.error_fg_color = p.hata;
-    v.window_stroke = kenarlik;
-    v.window_corner_radius = CornerRadius::same(8);
-    v.menu_corner_radius = CornerRadius::same(6);
-
-    v.widgets.noninteractive.fg_stroke = Stroke::new(1.0_f32, p.metin);
-    v.widgets.noninteractive.bg_fill = p.zemin;
-    v.widgets.noninteractive.bg_stroke = kenarlik;
-
-    v.widgets.inactive.fg_stroke = Stroke::new(1.0_f32, p.metin);
-    v.widgets.inactive.bg_fill = p.faint;
-    v.widgets.inactive.weak_bg_fill = p.faint;
-    v.widgets.inactive.bg_stroke = kenarlik;
-    v.widgets.inactive.corner_radius = CornerRadius::same(6);
-
-    v.widgets.open.fg_stroke = Stroke::new(1.0_f32, p.metin);
-    v.widgets.open.bg_fill = p.faint;
-    v.widgets.open.weak_bg_fill = p.faint;
-    v.widgets.open.bg_stroke = kenarlik;
-    v.widgets.open.corner_radius = CornerRadius::same(6);
-
-    v.widgets.hovered.fg_stroke = Stroke::new(1.0_f32, if koyu { Color32::WHITE } else { p.metin });
-    v.widgets.hovered.bg_fill = p.hover;
-    v.widgets.hovered.weak_bg_fill = p.hover;
-    v.widgets.hovered.bg_stroke = Stroke::new(1.0_f32, p.vurgu);
-    v.widgets.hovered.corner_radius = CornerRadius::same(6);
-
-    v.widgets.active.fg_stroke = Stroke::new(1.0_f32, if koyu { Color32::WHITE } else { p.metin });
-    v.widgets.active.bg_fill = p.aktif;
-    v.widgets.active.weak_bg_fill = p.aktif;
-    v.widgets.active.bg_stroke = Stroke::new(1.5_f32, p.vurgu);
-    v.widgets.active.corner_radius = CornerRadius::same(6);
-
-    v.selection.bg_fill = p.secim;
-    v.selection.stroke = Stroke::new(1.0_f32, p.vurgu);
-    v
+    let c = &mut yapilandirma.colors;
+    if koyu {
+        c.background = Some("#12151B".into());
+        c.foreground = Some("#E7EAF0".into());
+        c.border = Some("#2B3240".into());
+        c.muted = Some("#1B1F27".into());
+        c.muted_foreground = Some("#98A2B3".into());
+        c.primary = Some("#5B9BD5".into());
+        c.primary_foreground = Some("#0B1220".into());
+        c.primary_hover = Some("#74B0E4".into());
+        c.primary_active = Some("#4A87BF".into());
+        c.secondary = Some("#232936".into());
+        c.secondary_foreground = Some("#E7EAF0".into());
+        c.secondary_hover = Some("#2A3140".into());
+        c.secondary_active = Some("#333C4D".into());
+        c.accent = Some("#263241".into());
+        c.accent_foreground = Some("#E7EAF0".into());
+        c.button = Some("#202631".into());
+        c.button_foreground = Some("#E7EAF0".into());
+        c.button_hover = Some("#2A3140".into());
+        c.button_active = Some("#333C4D".into());
+        c.input = Some("#3A4454".into());
+        c.ring = Some("#5B9BD5".into());
+        c.selection = Some("#2B4A6B".into());
+        c.caret = Some("#74B0E4".into());
+        c.popover = Some("#1F242E".into());
+        c.popover_foreground = Some("#E7EAF0".into());
+        c.list = Some("#191D25".into());
+        c.list_hover = Some("#232A36".into());
+        c.list_active = Some("#2B3647".into());
+        c.list_active_border = Some("#5B9BD5".into());
+        c.list_even = Some("#1B1F27".into());
+        c.list_head = Some("#171B22".into());
+        c.tab_bar = Some("#151920".into());
+        c.tab = Some("#191D25".into());
+        c.tab_active = Some("#232A36".into());
+        c.tab_foreground = Some("#98A2B3".into());
+        c.tab_active_foreground = Some("#E7EAF0".into());
+        c.title_bar = Some("#12161C".into());
+        c.title_bar_border = Some("#2B3240".into());
+        c.sidebar = Some("#161A21".into());
+        c.sidebar_foreground = Some("#E7EAF0".into());
+        c.sidebar_border = Some("#2B3240".into());
+        c.sidebar_accent = Some("#232A36".into());
+        c.sidebar_accent_foreground = Some("#E7EAF0".into());
+        c.sidebar_primary = Some("#5B9BD5".into());
+        c.sidebar_primary_foreground = Some("#0B1220".into());
+        c.skeleton = Some("#232A36".into());
+        c.scrollbar = Some("#1B1F27".into());
+        c.scrollbar_thumb = Some("#3A4454".into());
+        c.scrollbar_thumb_hover = Some("#4A5568".into());
+        c.danger = Some("#F08078".into());
+        c.danger_foreground = Some("#2A0B08".into());
+        c.danger_hover = Some("#F49A93".into());
+        c.danger_active = Some("#D96A63".into());
+        c.success = Some("#5BC49A".into());
+        c.success_foreground = Some("#06251A".into());
+        c.success_hover = Some("#77D2AC".into());
+        c.success_active = Some("#45A57F".into());
+        c.warning = Some("#E8C468".into());
+        c.warning_foreground = Some("#2B2106".into());
+        c.warning_hover = Some("#F0D486".into());
+        c.warning_active = Some("#C9A64E".into());
+        c.link = Some("#74B0E4".into());
+        c.link_hover = Some("#8CC2EF".into());
+        c.link_active = Some("#4A87BF".into());
+    } else {
+        c.background = Some("#EEF1F5".into());
+        c.foreground = Some("#1D2430".into());
+        c.border = Some("#D5DBE3".into());
+        c.muted = Some("#F1F3F6".into());
+        c.muted_foreground = Some("#5B6675".into());
+        c.primary = Some("#2F6FA8".into());
+        c.primary_foreground = Some("#FFFFFF".into());
+        c.primary_hover = Some("#3D82C0".into());
+        c.primary_active = Some("#255A8B".into());
+        c.secondary = Some("#E9EDF2".into());
+        c.secondary_foreground = Some("#1D2430".into());
+        c.secondary_hover = Some("#DFE5EC".into());
+        c.secondary_active = Some("#D4DCE5".into());
+        c.accent = Some("#E3ECF7".into());
+        c.accent_foreground = Some("#1D2430".into());
+        c.button = Some("#FFFFFF".into());
+        c.button_foreground = Some("#1D2430".into());
+        c.button_hover = Some("#F1F3F6".into());
+        c.button_active = Some("#E8ECF1".into());
+        c.input = Some("#C9D1DB".into());
+        c.ring = Some("#2F6FA8".into());
+        c.selection = Some("#C9DDF2".into());
+        c.caret = Some("#2F6FA8".into());
+        c.popover = Some("#FFFFFF".into());
+        c.popover_foreground = Some("#1D2430".into());
+        c.list = Some("#FFFFFF".into());
+        c.list_hover = Some("#F1F3F6".into());
+        c.list_active = Some("#E3ECF7".into());
+        c.list_active_border = Some("#2F6FA8".into());
+        c.list_even = Some("#F7F9FB".into());
+        c.list_head = Some("#F1F3F6".into());
+        c.tab_bar = Some("#E9EDF2".into());
+        c.tab = Some("#EAEEF3".into());
+        c.tab_active = Some("#FFFFFF".into());
+        c.tab_foreground = Some("#5B6675".into());
+        c.tab_active_foreground = Some("#1D2430".into());
+        c.title_bar = Some("#E9EDF2".into());
+        c.title_bar_border = Some("#D5DBE3".into());
+        c.sidebar = Some("#F3F5F8".into());
+        c.sidebar_foreground = Some("#1D2430".into());
+        c.sidebar_border = Some("#D5DBE3".into());
+        c.sidebar_accent = Some("#E3ECF7".into());
+        c.sidebar_accent_foreground = Some("#1D2430".into());
+        c.sidebar_primary = Some("#2F6FA8".into());
+        c.sidebar_primary_foreground = Some("#FFFFFF".into());
+        c.skeleton = Some("#E3E7EC".into());
+        c.scrollbar = Some("#E9EDF2".into());
+        c.scrollbar_thumb = Some("#B8C1CC".into());
+        c.scrollbar_thumb_hover = Some("#9AA6B4".into());
+        c.danger = Some("#B3261E".into());
+        c.danger_foreground = Some("#FFFFFF".into());
+        c.danger_hover = Some("#C93A32".into());
+        c.danger_active = Some("#8F1D17".into());
+        c.success = Some("#1F7A55".into());
+        c.success_foreground = Some("#FFFFFF".into());
+        c.success_hover = Some("#2A9167".into());
+        c.success_active = Some("#176343".into());
+        c.warning = Some("#8A6400".into());
+        c.warning_foreground = Some("#FFFFFF".into());
+        c.warning_hover = Some("#A77A00".into());
+        c.warning_active = Some("#6E5000".into());
+        c.link = Some("#2F6FA8".into());
+        c.link_hover = Some("#3D82C0".into());
+        c.link_active = Some("#255A8B".into());
+    }
+    yapilandirma
 }
 
-/// Pencerenin egui çiziminden önce temizlendiği zemin rengi
-/// (ilk kare ve yeniden boyutlandırma boşluklarında görünür).
-pub fn zemin_rengi(koyu: bool) -> Color32 {
-    if koyu { KOYU.zemin } else { ACIK.zemin }
-}
-
-/// Tema görselini uygular ve dokunmatik stil (44px hedef, geniş aralıklar) ayarlar.
-pub fn tema_uygula(ctx: &egui::Context, koyu: bool) {
-    ctx.set_visuals(gorsel_olustur(if koyu { &KOYU } else { &ACIK }, koyu));
-    ctx.global_style_mut(|stil| {
-        stil.spacing.interact_size = egui::vec2(DOKUNMA_HEDEFI, DOKUNMA_HEDEFI);
-        stil.spacing.button_padding = egui::vec2(14.0, 12.0);
-        stil.spacing.item_spacing = egui::vec2(14.0, 10.0);
-        stil.spacing.icon_spacing = 8.0;
+/// SP Grafit temasını kaydeder ve seçilen modu uygular.
+pub fn tema_kur(cx: &mut App, koyu: bool) {
+    let acik = Rc::new(yapilandirma(false));
+    let koyu_yapilandirma = Rc::new(yapilandirma(true));
+    Theme::update(cx, |theme| {
+        theme.light_theme = acik;
+        theme.dark_theme = koyu_yapilandirma;
     });
+    tema_uygula(cx, koyu);
+}
+
+pub fn tema_uygula(cx: &mut App, koyu: bool) {
+    Theme::change(
+        if koyu {
+            ThemeMode::Dark
+        } else {
+            ThemeMode::Light
+        },
+        None,
+        cx,
+    );
 }

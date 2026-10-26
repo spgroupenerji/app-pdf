@@ -20,6 +20,13 @@ if (-not (Test-Path "$llvmBin\clang-cl.exe")) {
 }
 Write-Host "LLVM OK: $llvmBin"
 
+$cmakeBin = "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin"
+if (-not (Test-Path "$cmakeBin\cmake.exe")) {
+    Write-Host "UYARI: CMake bulunamadi. Visual Studio C++ is yuku ile birlikte kurulmalidir." -ForegroundColor Yellow
+} else {
+    Write-Host "CMake OK: $cmakeBin"
+}
+
 if (-not (Test-Path "C:\Program Files (x86)\Microsoft Visual Studio")) {
     Write-Host "UYARI: Visual Studio C++ Build Tools bulunamadi gibi gorunuyor." -ForegroundColor Yellow
     Write-Host "Kurulum: https://visualstudio.microsoft.com/downloads/ (Desktop development with C++)"
@@ -36,5 +43,5 @@ Write-Host "=== 3/3 Derleme (ilk derlemede MuPDF C cekirdegi derlenir, uzun sure
 if ($LASTEXITCODE -ne 0) { exit 1 }
 
 Write-Host ""
-Write-Host "HAZIR: $kok\release\pdf_goruntuleyici.exe"
+Write-Host "HAZIR: $kok\release\app-pdf_beta-v<damga>.exe"
 Write-Host "Gelistirmeye devam: kok dizinde 'cargo check' / 'cargo build' / 'cargo run'"
