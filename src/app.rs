@@ -7,7 +7,6 @@ use crossbeam_channel::{Receiver, Sender};
 use gpui_kit::component::input::{InputEvent, InputState};
 use gpui_kit::component::TitleBar;
 use gpui_kit::*;
-use rfd::FileDialog;
 
 use crate::isci::render_isci;
 use crate::mesaj::{IslemTalebi, RenderSonuc, RenderTalebi, SayfaGoruntusu};
@@ -296,17 +295,36 @@ impl GoruntuleyiciUygulama {
     }
 
     pub fn dosya_sec(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(dosyalar) = FileDialog::new()
-            .add_filter("PDF Belgesi", &["pdf"])
-            .set_title("PDF Belgesi veya Belgeleri Seç")
-            .pick_files()
-        {
-            for yol in dosyalar {
-                if let Some(yol) = yol.to_str() {
-                    self.dosya_ac(yol, window, cx);
+        let secim = cx.prompt_for_paths(PathPromptOptions {
+            files: true,
+            directories: false,
+            multiple: true,
+            prompt: Some("PDF Belgesi Seç".into()),
+        });
+        cx.spawn_in(window, async move |this, cx| {
+            let yollar = match secim.await {
+                Ok(Ok(Some(yollar))) => yollar,
+                Ok(Ok(None)) | Err(_) => return,
+                Ok(Err(hata)) => {
+                    let _ = this.update_in(cx, |this, _, cx| {
+                        this.bildir(
+                            format!("Dosya seçici açılamadı: {}", hata),
+                            BildirimTuru::Hata,
+                            cx,
+                        );
+                    });
+                    return;
                 }
-            }
-        }
+            };
+            let _ = this.update_in(cx, |this, window, cx| {
+                for yol in yollar {
+                    if let Some(yol) = yol.to_str() {
+                        this.dosya_ac(yol, window, cx);
+                    }
+                }
+            });
+        })
+        .detach();
     }
 
     pub fn dosya_ac(&mut self, yol: &str, window: &mut Window, cx: &mut Context<Self>) {

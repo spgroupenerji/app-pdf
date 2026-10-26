@@ -146,7 +146,9 @@ impl GoruntuleyiciUygulama {
                     .size(px(24.))
                     .rounded(px(6.))
                     .overflow_hidden()
-                    .bg(cx.theme().primary)
+                    .bg(rgb(0xFFFFFF))
+                    .border_1()
+                    .border_color(cx.theme().border)
                     .when_some(self.logo.clone(), |el, logo| {
                         el.child(img(logo).size(px(24.)))
                     }),

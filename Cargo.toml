@@ -11,8 +11,6 @@ gpui-kit = "=0.8.1"
 mupdf = "0.8"
 # Is parcaciklari arasi asenkron mesajlasma
 crossbeam-channel = "0.5"
-# Yerel dosya acma diyalogu
-rfd = "0.17"
 image = "0.25"
 
 [build-dependencies]
