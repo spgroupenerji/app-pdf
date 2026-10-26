@@ -217,6 +217,7 @@ impl GoruntuleyiciUygulama {
         });
 
         let odak = cx.focus_handle();
+        window.set_window_title("SP GROUP PDF Görüntüleyici");
 
         Self {
             belgeler: Vec::new(),
@@ -1037,7 +1038,8 @@ pub fn pdf_mi(yol: &str) -> bool {
 }
 
 fn render_goruntusu(goruntu: SayfaGoruntusu) -> Option<Arc<RenderImage>> {
-    let tampon = image::RgbaImage::from_raw(goruntu.genislik, goruntu.yukseklik, goruntu.rgba)?;
+    let veri = crate::sekme::rgba_to_bgra(goruntu.rgba);
+    let tampon = image::RgbaImage::from_raw(goruntu.genislik, goruntu.yukseklik, veri)?;
     Some(Arc::new(RenderImage::new(vec![image::Frame::new(tampon)])))
 }
 

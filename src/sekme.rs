@@ -128,6 +128,14 @@ impl PdfSekme {
     }
 }
 
+/// GPUI RenderImage BGRA beklediği için RGBA piksel verisini dönüştürür.
+pub fn rgba_to_bgra(mut veri: Vec<u8>) -> Vec<u8> {
+    for piksel in veri.as_chunks_mut::<4>().0 {
+        piksel.swap(0, 2);
+    }
+    veri
+}
+
 /// Zoom değerini güvenli aralığa kırpar.
 pub fn zum_sinirla(zum: f32) -> f32 {
     if !zum.is_finite() {
@@ -182,5 +190,10 @@ mod testler {
         let alan = Size::new(px(656.0), px(456.0));
         let zum = sigdirma_hesapla(alan, 600.0, 800.0, SigdirmaModu::Sayfa).unwrap();
         assert!((zum - 0.5).abs() < 0.0001);
+    }
+
+    #[test]
+    fn rgba_bgra_donusumu_kanallari_degistirir() {
+        assert_eq!(rgba_to_bgra(vec![10, 20, 30, 255]), vec![30, 20, 10, 255]);
     }
 }
